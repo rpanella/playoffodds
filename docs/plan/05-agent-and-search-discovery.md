@@ -1,67 +1,121 @@
-# 05 — Agent & Search Discovery
+# 05 — Agent and Search Discovery Contract
 
-**Status: DRAFT v1 (2026-07-16) — pending owner review.** Research verified against primary sources 2026-07-16 (vendor docs, official specs, measured studies — citations inline). **This is the fastest-moving area in the plan: §9 mandates a quarterly re-verification ritual.**
+**Status: DRAFT v2 (2026-07-22) — product requirements stable; crawler/vendor/package specifics require Phase 0 and pre-launch verification.**
 
-**Goal (owner directive):** PlayoffOdds becomes a standard source for LLM agents — when anyone asks an AI about a team's playoff odds, the answer cites playoffodds.com and uses our current data. This doc makes that a set of build requirements, not a hope.
+Goal: when a person or agent asks for current playoff odds, PlayoffOdds can be discovered, fetched, understood, and cited with the exact snapshot lineage. Discovery pages, anonymous API and MCP are one product surface over stable local DTOs—not separate interpretations of the data.
 
-**Strategy in one line:** the goal has two halves — **discovery/citation** (an agent's search-and-fetch pipeline finds our pages, reads them, cites them) and **programmatic consumption** (agents call our API/MCP server directly as a tool). Both are winnable because the incumbent gap is real: existing odds sites are largely client-rendered and API-less, and LLMs demonstrably cannot answer "what are the Red Sox's odds today" from training data — they must fetch live. Whoever is simultaneously (1) crawlable plain-HTML with the number in the first sentence, (2) verifiably fresh, and (3) callable as a no-auth tool, wins.
+## 1. Principles
 
----
+1. **Answer-first resilient HTML.** A team/league page includes its primary odds, exact `as_of`, mode, reconstruction status and canonical link as semantic server-rendered text/table. JavaScript adds interaction; it is not required to discover the answer.
+2. **Fresh but reproducible.** `current` canonical pages point to the atomic local snapshot pointer. Immutable snapshot/archive URLs remain citable and identify rules/model/input lineage.
+3. **One DTO meaning.** HTML, API and MCP agree on identifiers, decimal units, snapshot/spine/intraday semantics, warnings and correction state.
+4. **Zero-friction core reads.** The small Phase 3/4 anonymous API/MCP slice does not require an account. Abuse is controlled with caching, rate/concurrency limits and bounded inputs.
+5. **No citation theater.** A generic attribution object is not sufficient. Search/fetch results carry a non-empty canonical HTTPS URL in the representation expected by the verified target client, plus structured human-readable content.
+6. **Verify fast-moving details.** Bot names, user agents, directory processes, MCP/OpenAI package behavior, crawler rendering and framework versions are rechecked against primary vendor/spec sources in Phase 0, before launch and quarterly. This plan does not promise future vendor behavior.
 
-## 1. Site discovery requirements (binding on Phase 3 — these are build constraints, not features)
+## 2. Crawlable page contract
 
-1. **SSR is existential, not preferable.** Confirmed through 2026: GPTBot, ClaudeBot, and PerplexityBot fetch HTML but **do not execute JavaScript** ([Vercel study](https://vercel.com/blog/the-rise-of-the-ai-crawler); [2026 confirmation](https://searchoptimo.com/blog/do-ai-crawlers-render-javascript)); only Google renders. Every odds number must exist as real text/`<table>` markup in the server-rendered HTML. Inertia SSR (doc 10) is therefore mandatory, and hydration-only content is a launch-blocking bug class.
-2. **Answer-first sentence on every page.** Each team/league page opens with a plain quotable sentence: *"As of July 16, 2026, the Minnesota Vikings have a 52.9% chance to make the playoffs (updated daily)."* Google's AI Mode does "query fan-out" — many sub-queries — rewarding one-question-one-page structure ([Google AI features doc](https://developers.google.com/search/docs/appearance/ai-features)); our IA (doc 10 §1) already matches. Page titles/H1s phrased as the question's answer.
-3. **Stable canonical URLs + visible freshness.** `/{league}/{team}` is the canonical, undated, citable URL for "current odds"; `?date=` archive permalinks self-canonicalize and are labeled as archives. Every page shows "Updated {timestamp}" visibly — recency strongly correlates with AI citation.
-4. **robots.txt: welcome everyone, explicitly.** `User-agent: * / Allow: /` plus a `Sitemap:` line — and explicitly enumerate the AI agents so intent is unambiguous: OpenAI `GPTBot`/`OAI-SearchBot`/`ChatGPT-User` ([OpenAI bots](https://developers.openai.com/api/docs/bots)), Anthropic `ClaudeBot`/`Claude-SearchBot`/`Claude-User` ([Anthropic](https://support.claude.com/en/articles/8896518)), `PerplexityBot` ([Perplexity](https://docs.perplexity.ai/guides/bots)), `Google-Extended` (controls Gemini grounding — never disallow; [Google](https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers)), `Bingbot`, `Meta-ExternalAgent`, `CCBot`. OpenAI: sites opted out of OAI-SearchBot "will not be shown in ChatGPT search answers." **Never** emit `noarchive`/`nocache` (their absence = consent for Copilot answers) or restrictive Content-Signals/AIPREF directives — those standards exist to say no; we're saying yes.
-5. **CDN/WAF posture — the #1 silent killer.** Since 2025-07-01 **new Cloudflare zones block AI crawlers by default**, tightening again 2026-09-15 ([Cloudflare](https://blog.cloudflare.com/content-independence-day-ai-options/); [TechCrunch 2026-07-01](https://techcrunch.com/2026/07/01/cloudflares-new-policy-pushes-ai-companies-to-pay-for-publishers-content/)). If Cloudflare fronts the site: AI Crawl Control set to allow; no managed robots.txt (it writes `ai-train=no`); no Pay-Per-Crawl enrollment; verified AI bots exempt from bot-fighting (prefer Web Bot Auth verification over challenges — [Cloudflare signed agents](https://blog.cloudflare.com/signed-agents/)); consider the free **Markdown for Agents** toggle ([Cloudflare, 2026-02-12](https://blog.cloudflare.com/markdown-for-agents/)). Robots.txt alone is insufficient — whitelist the published IP ranges ([OpenAI](https://openai.com/gptbot.json), [Anthropic](https://claude.com/crawling/bots.json), [Perplexity](https://www.perplexity.com/perplexitybot.json)).
-6. **Sitemap + IndexNow, honest lastmod.** `lastmod` is Google's post-ping freshness signal and is trusted only when it "consistently matches reality" ([Google](https://developers.google.com/search/blog/2023/06/sitemaps-lastmod-ping)) — ours ties to spine-snapshot writes, which is exactly a significant daily change. Register: Google Search Console + **Bing Webmaster Tools + IndexNow** (pinged on snapshot write; Bing feeds Copilot). Bing's **AI Performance report** (public preview 2026-02) shows Copilot citation counts free ([Bing blog](https://blogs.bing.com/webmaster/February-2026/Introducing-AI-Performance-in-Bing-Webmaster-Tools-Public-Preview)) — our primary citation metric at launch.
-7. **JSON-LD, right-sized.** Google states no special AI markup is needed ([Google AI features doc](https://developers.google.com/search/docs/appearance/ai-features)) — visible HTML is the mechanism. Ship the standard set: `Organization`, `WebSite`, `WebPage` with accurate `dateModified`, and `Dataset` for the odds datasets (consumed by Google Dataset Search — on-brand for us). **Skip FAQPage markup** (rich results killed 2023→2026); a visible plain-HTML Q&A section is fine.
-8. **Measure from day one:** request logging by AI user-agent (OAI-SearchBot/ClaudeBot/PerplexityBot appear within days if unblocked) + the Bing AI Performance report. A weekly "agent traffic" line in ops review.
+Every indexable current team/league page has:
 
-Encouraging base rate: only ~38% of AI Overview citations now come from top-10 ranked results ([Ahrefs](https://ahrefs.com/blog/ai-overview-citations-top-10/)) — per-team answer pages can win citations long before a new domain wins rankings.
+- a stable canonical URL independent of snapshot internals;
+- a first-screen sentence/table answer containing team/league, metric, percentage, exact `as_of`, and current/reconstruction warning when material;
+- visible link to an immutable snapshot or date-resolved archive and methodology/model lineage;
+- useful navigation, table headers/captions and status without JavaScript;
+- accurate `dateModified`, canonical metadata, title/H1, sitemap entry and structured data only where supported and truthful;
+- correction/retraction link when the current result supersedes a materially wrong published revision; and
+- cache/SSR behavior keyed by pointer/snapshot version so stale HTML cannot claim a newer timestamp.
 
-## 2. API consumption requirements (amends features/16)
+Team pages use `/{league}/{team-slug}`. Archive query/route semantics follow doc 02/features/11 and reveal requested versus resolved spine date. Immutable snapshot IDs are available through API/MCP even if the primary browser route remains friendly.
 
-1. **Anonymous GET on core read endpoints** (current odds, series, seeds, tonight) with generous per-IP limits. Keys (accounts-lite, D25) become the *upgrade* — higher limits, bulk CSVs — never the gate. Rationale: a large share of consumption is an agent curling the API mid-conversation; an email-signup wall is a dead end for it, and auth friction is the consistently identified #1 agent-adoption killer ([Stack Overflow on MCP auth](https://stackoverflow.blog/2026/01/21/is-that-allowed-authentication-and-authorization-in-model-context-protocol/)). **This amends features/16 §3** (previously: single free keyed tier).
-2. **Agent-legible errors:** 429s carry `Retry-After` plus a JSON body stating exactly how to get a key and at what limits — agents read error bodies and act on them ([Anthropic tool-writing guidance](https://www.anthropic.com/engineering/writing-tools-for-agents)). Open CORS on GET.
-3. **Attribution object in every response** — the one mechanism with a primary-source guarantee: ChatGPT generates citation metadata iff tool results carry a non-empty `url` ([OpenAI MCP docs](https://developers.openai.com/api/docs/mcp)). Every API/MCP payload embeds `attribution: { name, url: <canonical deep link to the matching page>, terms: "Free with attribution" }`. This also serves D26's attribution requirement mechanically instead of hopefully.
-4. **OpenAPI 3.1 at a stable URL** (`/openapi.json`, mirrored at `/.well-known/openapi.json`) — still the lingua franca beneath MCP tools and Google's new discovery formats.
-5. **Docs, the Stripe pattern** ([Stripe: building with LLMs](https://docs.stripe.com/building-with-llms)): every docs page mirrored as markdown (`.md` URL variants), an `/llms.txt` index pointing at them, and **one single-file complete API reference** (endpoints, curl-first examples, inline sample JSON, auth, attribution terms, rate limits) that a coding agent ingests in one fetch — this is the owner's "API docs in a file" requirement, confirmed as current best practice.
+SSR operational requirements—supervised Node process if used, coupled deploy/build, health/restart/logs/metrics/rollback and no-JS tests—are in doc 06. If SSR fails, the service must prefer last-good semantic HTML or an explicit unavailable state, not a blank hydrated shell.
 
-## 3. The MCP server — a first-class deliverable
+## 3. Crawler and robots policy
 
-The standard 2026 move for "become the source agents use": official vendor MCP servers from Alpha Vantage (Anthropic-verified connector), Polygon.io, Sportradar. Ours:
+Crawler discovery and model training are separate owner choices (O2):
 
-- **Stack:** `laravel/mcp` — `Mcp::web('/mcp', PlayoffOddsServer::class)`, remote Streamable HTTP, standard route middleware ([Laravel MCP docs](https://laravel.com/docs/13.x/mcp)). **No auth** on the read-only server (accepted by both Claude custom connectors — all plans — and ChatGPT developer mode); per-IP throttle.
-- **Few, high-leverage tools** (not endpoint-per-tool; [Anthropic guidance](https://www.anthropic.com/engineering/writing-tools-for-agents)): `get_playoff_odds(league, team?, date?)`, `get_standings(league)`, `get_tonight(league)` (leverage slate), `search_teams(query)` — token-efficient, human-readable fields. Plus the **ChatGPT `search`/`fetch` contract with non-empty `url` on every result** — the detail that turns data into citations. All tools `readOnlyHint: true`, titled, with a server-level `Instructions` block (missing annotations are a common directory-rejection reason).
-- **Spec-churn note:** MCP 2026-07-28 (stateless transport, breaking) lands within weeks — ride the official SDK/package updates, never hand-roll the transport; the 12-month deprecation policy protects current clients ([MCP blog](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)).
-- **Listings, in order:** official **MCP Registry** (`server.json`, DNS-verified namespace `com.playoffodds/*`; aggregators like PulseMCP/Smithery mirror it hourly); **ChatGPT app directory** (domain-verification token, privacy policy, review ~1–2 weeks; process names churn — re-check at submission); **Claude connectors directory** — high value but gated on a **Team/Enterprise plan** → Q21 for the owner; note users on *any* Claude plan can add our server by URL regardless, so the directory is amplification, not access.
-- Cheap unsettled-standard bets (publish static files, build nothing): `.well-known` MCP server card, Google **ARD** `ai-catalog.json` ([announced 2026-06-17](https://developers.googleblog.com/announcing-the-agentic-resource-discovery-specification/)).
-
-## 4. Deliberately skipped (dead or hype — with receipts)
-
-`/.well-known/ai-plugin.json` (plugins dead since 2024); Custom GPTs/GPT Actions (superseded by Workspace Agents + MCP apps, 2026-04); `agents.json` (stalled v0.1); **x402/pay-per-call** (real and growing, but it's monetization — contradicts D26 at launch; natively agent-payable HTTP 402 is the revisit path if a paid tier ever arrives); `llms-full.txt` generation pipelines beyond our single-file docs (no major provider fetches llms.txt in production — [Mueller](https://www.searchenginejournal.com/google-says-llms-txt-comparable-to-keywords-meta-tag/544804/), [log studies](https://aeoengine.ai/blog/llms-txt-zero-usage-ai-bots-ignore) — its real audience is docs-pointed coding agents, which our §2.5 file serves); FAQPage markup; paid GEO platforms (server logs + Bing's free report give the same signal).
-
-## 5. Content & citation flywheel
-
-The academic GEO result: statistics, quotations, and citable provenance lift generative-engine visibility ~30–40% ([Aggarwal et al.](https://arxiv.org/abs/2311.09735)); third-party mentions correlate most with AI visibility ([Ahrefs](https://ahrefs.com/blog/ai-search-overlap/)). Our existing plan already builds the flywheel: the transparency page (doc 10 §6) gives writers a methodology to cite; free CSVs (features/16) give bloggers data to quote; OG cards and shareable scenarios (features/11–12) spread the URLs that agents later retrieve. New requirement: the attribution format published on `/model` includes a copy-paste citation line, and every embed/share artifact carries the canonical URL.
-
-## 6. Phasing (adds to 90-build-order)
-
-- **Phase 3 (site build):** §1 items 1–3, 7 are build constraints; robots.txt + sitemap + JSON-LD components; AI-user-agent logging.
-- **Phase 4 (launch checklist):** search registrations (GSC, Bing WMT, IndexNow live), CDN/WAF audit against §1.5, `/llms.txt` + docs `.md` mirrors, attribution/citation page, Bing AI Performance baseline.
-- **Phase 5–6 (with the public API):** anonymous GET tier + OpenAPI + single-file reference + attribution objects (§2); **MCP server + registry listings** (§3) — early-ship candidate: it's a thin wrapper over resources that exist from Phase 2, and directory review queues reward starting early.
-
-## 7. PROPOSED resolutions (owner review requested)
-
-| Item | Proposal | Rationale |
+| Purpose | Example policy decision | Proposed posture |
 |---|---|---|
-| Anonymous API access | Amend features/16: **anonymous GET tier** on core reads; keys = upgrade only | Auth friction kills mid-conversation agent fetches; the citation goal needs zero-friction reads |
-| MCP server | **First-class deliverable** alongside the public API; no-auth read-only; registry + ChatGPT directory listings at launch of the API phase | The standard 2026 mechanism for being an agent's data source; near-zero marginal build cost on `laravel/mcp` |
-| Claude connectors directory (**Q21**) | **Defer** the Team-plan purchase until the MCP server shows organic usage; users can connect by URL meanwhile | Directory is amplification, not access; spend when there's traction to amplify |
-| Maintenance ritual | **Quarterly re-verification** (mirrors doc 04 §6.3): crawler/user-agent lists, CDN defaults, MCP spec/directory processes, llms.txt status | Every load-bearing fact here has changed within 12 months; assume it keeps changing |
+| Search/discovery/citation | `OAI-SearchBot` and equivalent verified search agents | Allow, subject to abuse/cost controls. |
+| User-triggered fetch | verified user/agent fetchers | Allow public pages/API within limits. |
+| Model training | `GPTBot` and other training crawlers | Separate owner decision; do not infer from discovery permission. |
+| Conventional search | major search crawlers | Allow indexable public pages. |
+| Unknown/high-cost automation | unverified bot traffic | Rate-limit/challenge/block based on behavior without breaking recorded verified-bot policy. |
 
-## 8. Dependencies
+Phase 3 produces a checked-in policy matrix mapping verified current user agents/purposes to robots, CDN/WAF and rate-limit behavior. Pre-launch tests fetch representative pages from outside the origin path and verify status, HTML answer, cache, robots and no challenge for allowed agents. Managed CDN robots/bot defaults must not contradict the repository policy.
 
-Binds doc 10/11 (SSR, answer-first composition, timestamps), features/16 (tier amendment, docs format, attribution objects), doc 02 (IndexNow ping on spine-snapshot write; `attribution` URLs come from canonical route conventions), 90 (checklist items per phase). No SportsCrunch asks.
+No directive is added merely because it sounds agent-friendly. Sitemap/`lastmod`, IndexNow/search registrations, structured data, markdown mirrors, `llms.txt` or emerging discovery files ship only when truthful, low-risk and verified useful; none substitutes for accessible HTML and stable API/MCP contracts.
+
+## 4. Small anonymous API slice
+
+By Phase 3 or the Phase 4 launch gate (D38), expose stable versioned GET DTOs for:
+
+- leagues and teams discovery;
+- current odds/standings and seed distribution;
+- immutable snapshot fetch;
+- basic spine series/history.
+
+Exact endpoints and full contract are in features/16. All reads use local published data, carry a non-empty canonical page URL and snapshot/rules/model lineage, and use decimal probabilities in `[0,1]`. Open CORS is limited to public GETs. Errors are structured and agent-legible; 429 includes `Retry-After`. API docs/OpenAPI are generated/tested from the same contract and identify anonymous limits.
+
+## 5. MCP search/fetch compatibility contract
+
+Phase 0 verifies the current MCP/client specification and official package. The launch slice must nevertheless satisfy these observable semantics.
+
+### `search`
+
+Input: a bounded non-empty text query plus optional league/team/season filters and page cursor. It searches only published PlayoffOdds resources and returns an ordered result list. Every result contains:
+
+- stable resource/result ID;
+- concise title;
+- **non-empty absolute canonical HTTPS `url`** to the matching public PlayoffOdds page/resource;
+- short answer/snippet with `as_of` when the result includes odds;
+- structured metadata: resource type, league/team IDs, snapshot ID, mode, reconstruction/correction warning; and
+- next-page cursor when more results exist.
+
+It never returns a search-results URL as the canonical team/league citation and never fabricates a current result if no published snapshot exists.
+
+### `fetch`
+
+Input: exactly one stable result/resource ID or previously returned canonical PlayoffOdds URL. URLs are normalized and restricted to the owned canonical domain/resources; arbitrary web fetch is rejected.
+
+Successful output contains both:
+
+- MCP text content suitable for direct quotation/summarization (title, plain-language answer, exact `as_of`, units, warnings, methodology/lineage links); and
+- `structuredContent` using the same versioned public DTO fields.
+
+The result itself and any resource/link content field required by the verified client carry the same **non-empty canonical HTTPS `url`**. Snapshot ID, rules/model versions, mode, captured/reconstructed status and correction links remain present. An embedded `attribution` object may also exist for terms, but it is not the citation mechanism by itself.
+
+Unknown/withdrawn IDs, invalid URLs, unavailable current data and rate limits return typed errors with recovery guidance; no empty URL or success-with-empty-content response. Search followed by fetch is covered by end-to-end compatibility tests against each targeted client. Exact tool annotations/names/transports follow the then-current verified standard/package; read-only semantics and bounded inputs are mandatory.
+
+## 6. MCP/API content quality
+
+- Percentages are delivered as decimal fields plus formatted explanatory text; no ambiguity between `0.529` and `52.9%`.
+- “Current” includes exact pointed snapshot; historical responses state spine/intraday and requested/resolved cutoff semantics.
+- Probabilistic estimates never say “clinched.” Proven/unknown status is separate.
+- Retrospective reconstruction is named in the answer when applicable.
+- Canonical URLs identify the matching league/team/snapshot context, not a generic homepage.
+- Responses stay compact: core answer first, then lineage/warnings; callers can follow model/rules links for detail.
+
+## 7. Discovery content and measurement
+
+The methodology/model page publishes model purpose, calibration/proper-score/coverage evidence, known limitations, rule parity/replay evidence, historical reconstruction policy, change log and a copyable citation format after O3. Rule pages render cited human artifacts or approved summaries without excessive copying.
+
+Measure: allowed crawler fetch success and freshness; search referrals/citations where observable; API/MCP search→fetch success, error/rate-limit and canonical URL presence; agent-generated referral/citation samples; page no-JS answer availability. User-agent traffic is security/privacy-minimized under doc 06/O5.
+
+Success means agents retrieve the correct current or immutable resource and preserve its URL/lineage—not merely that a bot hit robots.txt.
+
+## 8. Security, privacy, and legal boundaries
+
+- MCP/API are read-only over published PlayoffOdds outputs; they do not proxy raw SportsCrunch lines/inputs or expose private operational traces.
+- Enforce query length, filter enums, page size, cursor integrity, response size, rate/concurrency/global budgets and cache isolation.
+- Do not log full prompts, scenario encodings, API keys or personal identifiers by default.
+- Attribution/license wording awaits O3 and upstream/mark review. Discovery permission does not grant data redistribution rights beyond published terms.
+- Directory/registry submissions, paid marketplace listings and training access are optional distribution decisions; they do not block direct URL/MCP/API usefulness.
+
+## 9. Phase gates
+
+- **Phase 0:** verify target crawler/client/package behavior and exact MCP search/fetch schema; freeze stable DTO/canonical URL rules; prototype SSR/no-JS answer; create O2 matrix draft.
+- **Phase 3:** current pages, small anonymous API and basic MCP search/fetch pass DTO, URL, lineage, error, caching, no-JS, accessibility and abuse tests in staging.
+- **Phase 4:** external crawl/WAF/CDN verification, O2 owner choice, legal/attribution readiness, search registrations where useful, and measurement baseline before public launch.
+- **Phase 6:** keys, bulk downloads, more resources/tools, registry/directory submissions and complete developer docs expand the surface without breaking v1.
+
+Quarterly verification records source/date, observed change, affected contract/test and any migration. A vendor change can disable a listing/integration, but stable HTML/API resources remain the fallback.

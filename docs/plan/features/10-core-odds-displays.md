@@ -1,66 +1,87 @@
-# Features 10 — Core Odds Displays
+# Features 10 — Core Odds, Standings, Team, and Seed Displays
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.** Covers reference-doc features #1–7, #27, #28, #31. Everything here reads Layer-1 aggregates (doc 02 §4) from the latest snapshot — no simulation in any request path.
+**Status: DRAFT v2 (2026-07-22).** Phase 3 core experience; reads local published data only.
 
----
+## 1. Routes and source contract
 
-## 1. Information architecture & routes
+| Route | Primary local source |
+|---|---|
+| `/` | current publication pointers, local games, selected movement/conditionals when available |
+| `/{league}` | `snapshot_team_standings` + `team_odds` for current pointer |
+| `/{league}/seeds` | seed/path aggregates + explicit standings mode |
+| `/{league}/{team}` | local team/season/game materialization + standings/odds/history |
+| `/model` | retained model/rules/replay/calibration/lineage artifacts |
 
-| Route | Page | Primary content |
-|---|---|---|
-| `/` | Home | Cross-league dashboard: today's headline movers, tonight's highest-leverage games (features/13 teaser), league entry cards |
-| `/{league}` | League hub | The odds table (§2) — the default league view |
-| `/{league}/seeds` | Seeding matrix (§3) | |
-| `/{league}/{team}` | Team page (§5) | e.g. `/nfl/vikings` — slug from team shortname |
-| `/model` | Transparency (§6) | Ratings, methodology, verification counters |
+All pages identify snapshot ID/revision, exact `as_of`, published time, spine/intraday, `official` versus `if_season_ended`, captured/reconstructed status, stale/degraded state and material correction link. No page fetches SportsCrunch or simulates during rendering.
 
-Inertia + Vue-or-React (Q19, decided at Phase 3 start) with SSR enabled — odds pages are prime search/share targets and must render server-side. Every page is static per snapshot: cache keyed on `(route, snapshot_id)`, invalidated only when a new snapshot lands. A slim global header shows league nav + "as of {snapshot time}" with the date-selector entry point (features/11).
+## 2. League table
 
-## 2. League odds table (#1–4, #7)
+One row per season-team, grouped by the league's season-scoped divisions/conferences. Core fields:
 
-One row per team, grouped by division (collapsible on mobile), columns:
+- official record/points and official shared rank/status;
+- separately labeled “if season ended” seed/path where meaningful;
+- projected final record/points interval;
+- playoff/qualification, division/path, bye/top-seed and championship probabilities;
+- 1-day/7-day movement with explicit comparison snapshots; and
+- local next game and start time where useful.
 
-| Column | Source | Notes |
-|---|---|---|
-| Record + projected record | `wins_mean`, `proj_record` | "10-7 → 11.2 wins" framing |
-| Playoffs % | `p_playoffs` | The headline column; default sort |
-| Division % / Wild card % | `p_division`, `p_wildcard` | The path split, side by side — a stated differentiator |
-| Top seed / Bye % | `p_seed[1]`, `p_bye` | League-appropriate (bye: NFL/MLB; Presidents' Trophy: NHL) |
-| Championship % | `p_championship` | The screenshot number |
-| Δ 1d / Δ 7d | `d1_p_playoffs`, `d7_p_playoffs` | Delta chips, signed + colored |
+Do not collapse official live standing and final-procedure seed into one unlabeled “current seed.” If SportsCrunch returns an unresolved tie, rows share the displayed position/warning; the UI never randomly orders them as official.
 
-- **Status badges** replace/augment probabilities when deterministic flags fire: `x` clinched playoffs, `y` clinched division, `z` clinched bye, `e` eliminated — same visual grammar fans know from newspaper standings, backed by our tiebreaker-correct flags (features/14).
-- **Probability display honesty rule (site-wide):** one decimal ≥1%; below that "<1%", above 99% ">99%". **Exact 100%/0% appear only when the deterministic clinch/elimination flag says so** — a Monte Carlo 100% is not a promise, a clinch is. This rule is a shared formatter used by every surface.
-- Mobile: division groups become stacked cards; columns beyond Playoffs/Division/Champ collapse behind a per-row expander. No horizontal page scroll ever (390px-first, features/15 discipline).
+Default sort is probability on the odds view and official order on the standings view; the user's selected view is URL-addressable. Mobile presents semantically equivalent cards/expanders without losing headers/relationships; a table remains available for screen readers/data access.
 
-## 3. Seeding probability matrix (#5)
+## 3. Probability and proof honesty
 
-Teams (rows, ordered by expected seed) × seeds (columns: 1–7 NFL; 1–6 MLB; 1–10 NBA including play-in slots 7–10 visually distinguished; 1–8 NHL by conference with wild-card columns) — cell = `p_seed[j]`, rendered as a heatmap with in-cell percentages. Conference toggle. A "miss" column on the right completes each row to 100%. Mobile: sticky team column, horizontally scrollable grid *within its own container*. The most-loved dead-538 artifact — this page is a marketing asset; make it screenshot-clean (title, date, watermark URL in the corner).
+- Stored/API probabilities are decimals `[0,1]`; UI normally displays one decimal percentage with `<0.1%`/`>99.9%` at tails.
+- A simulated `0` or `1` remains an estimate and does not produce clinched/eliminated language.
+- Official league-recognized status may be shown as **Official** with SportsCrunch `official` lineage. PlayoffOdds mathematical status appears only after Phase 5E with `proven` evidence.
+- Before proof exists, 100.0% sampling output formats as `>99.9%` and “not mathematically proven.” `unknown/not_proven` never looks like false.
+- Correction, degraded input and retrospective reconstruction indicators are textual/icons with accessible labels, not color alone.
 
-## 4. Win distributions (#6) & advancement cascade (#3)
+## 4. Seed/path matrix
 
-- **Distribution strip** per team: a compact percentile bar (p10–p90 band, p25–p75 emphasized, median tick) rendered inline on team pages and as an expandable row detail in the league table. BP-style honest framing: "the model identifies a range."
-- **Advancement cascade**: per team, the monotone chain P(playoffs) ≥ P(win round 1) ≥ … ≥ P(champion) as a stepped bar — team-page module + a league-wide sortable table at `/{league}/playoffs`.
+Rows are teams; columns are league-versioned qualification/seed/play-in slots plus miss. Header and page state name the standings mode. Cells are aggregate probabilities, not current official placement. Each row sums to 1 within displayed rounding tolerance; a textual/table alternative exposes exact values and lineage.
+
+Heatmap intensity is supplementary. Use visible percentages, sufficient contrast, labels/patterns for status, keyboard-accessible scrolling and sticky headers without trapping focus. Screenshot/share output includes date, mode, reconstruction/correction warning and canonical URL.
 
 ## 5. Team page
 
-Composition (top to bottom): header (record, seed-as-of-today, playoff% as the hero number + 1d/7d delta); status panel (clinch/magic-number fusion — "magic number 4 · 94% to clinch by Sep 20", features/14); odds summary cards (division / wild card / bye / championship); **odds history chart** (the features/11 component, division-rivals overlay default); win distribution strip; remaining schedule list — each game with date, opponent, anchored win prob, and a leverage badge when `game_conditionals` has a row (features/13); draft odds module slot (hidden until features/17 ships). Eliminated teams flip the page's framing: draft module promotes to the top, playoff modules compress (the Tankathon audience, same engine).
+Phase 3 composition:
 
-## 6. Transparency page (#27, #28) — the trust asset
+1. team identity, official record/status, exact `as_of`, current probability and movement;
+2. odds/path/seed/championship summary;
+3. one basic accessible spine history chart plus data table;
+4. projected record/points interval;
+5. remaining local schedule with start/neutral/anchor source warning; and
+6. concise methodology/lineage/correction links.
 
-- Published **power ratings** table per league (from the ratings endpoint) with plain-language explanation of the market-implied method and the dynamic-sim layer (anchors + drift, in accessible prose).
-- **SOS-remaining** per team (from `sos_remaining`).
-- **Verification receipts:** golden-season replay results ("our tiebreaker engine reproduces the official seeding of the last N seasons of every league, exactly"), tiebreak reach-frequency counters (doc 04 §6.4), the beyond-official `randomDraw` disclosure (doc 04 §8), coverage-test calibration stats (doc 01 §10), and the backfill methodology note (features/11).
-- Era rules pages: rendered `.md` rule files per league per era (doc 04 §2.1) — "the exact rules we apply, per season."
+Leverage/rooting/picker/proof/draft modules occupy defined extension slots only after their phase gates. The initial page does not promise a magic number or exact status field that Phase 2 does not produce.
 
-## 7. Visual system (#31)
+## 6. Methodology/model page
 
-Load the dataviz design skill before building any chart component (Phase 3 implementation note). System rules set here, used everywhere: one accent hue per league context with an intensity ramp for probability cells; clinched = saturated success state, eliminated = desaturated; delta chips green/red with neutral gray at |Δ|<0.1%; dark mode is first-class from the first component; every chart/table is a Vue-or-React component in a shared `ui/` package (`ProbCell`, `DeltaChip`, `HeatGrid`, `PercentileStrip`, `CascadeBar`, `OddsChart`) so features 11–17 compose rather than reinvent. Design benchmark per the reference doc: beat Tankathon on clarity, never ship "Excel screenshot" energy.
+Publish:
 
-## 8. Launch scope (PROPOSED)
+- what anchors, ratings, dynamic evolution and brackets do, in plain language;
+- versioned model/parameter/build identifiers and change history;
+- held-out proper scores, calibration and interval coverage with sample sizes/limitations;
+- SportsCrunch rule ownership, pinned artifact ID/checksum and PHP/TypeScript conformance evidence;
+- replay/retention/correction policy and current diagnostic summary;
+- captured walk-forward versus retrospective/frozen-modern history definitions; and
+- known unavailable inputs/simplifications (for example hypothetical pitcher/player context) without claiming them immaterial unless measured.
 
-**In for NFL launch:** league odds table, seeding matrix, team pages (with history chart + status panel), transparency page, home dashboard. **v1.1 (weeks after):** advancement cascade page (`/{league}/playoffs` — the aggregates exist day one; it's pure UI), distribution expander in the league table. Rationale: the table + matrix + team page are the shareable core; the cascade is additive.
+Rules citations link to the human-readable SportsCrunch artifact/approved local representation for the exact era. Marketing claims such as “reproduces every era exactly” require corpus evidence and scoped wording.
 
-## 9. Open questions
-- Q12 (brand/domain) — non-blocking for this doc's build, blocking for launch (watermarks, OG cards, header).
-- League hub default sort: playoffs % vs current standings order? *(lean: playoffs % — we are an odds site, not a standings site)*
+## 7. SSR/no-JS, accessibility, and failure states
+
+Core answer, table, team summary, timestamp, warnings and model link exist in server HTML. Hydration adds sorting/toggles/chart interaction but cannot change semantic numbers for the same snapshot.
+
+Meet doc 06 WCAG 2.2 AA requirements: keyboard/focus, real table headers/captions, chart data alternative, non-color status, reduced motion and 320px reflow. Dynamic current-pointer refresh never steals focus and announces a concise update.
+
+If no valid current pointer exists, show typed unavailable state. If the last good snapshot exceeds freshness threshold, keep its true timestamp and show stale/degraded banner. Never substitute a SportsCrunch response in the request path.
+
+## 8. Phase 3 acceptance
+
+- DTO/page values and lineage match the same immutable snapshot across HTML, hydrated UI and anonymous API.
+- `official`/`if_season_ended`, unresolved, proof and probabilistic states are distinguishable in automated fixtures.
+- No-JS core tasks and accessibility critical paths pass doc 06 gates.
+- Current/stale/correction/unavailable and SSR restart/rollback behavior passes production-shaped tests.
+- Representative mobile performance meets the Phase 3 budget or an approved measured degradation; advanced visualization polish is deferred rather than weakening semantics.

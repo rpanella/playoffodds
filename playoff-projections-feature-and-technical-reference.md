@@ -1,5 +1,7 @@
 # Playoff Projections: Feature Catalog & Technical Implementation Reference
 
+**Status: REFERENCE — amended 2026-07-22.** This competitive catalog is background, not the PlayoffOdds implementation contract. The versioned documents under [`docs/plan/`](docs/plan/00-overview.md) and the decision log control where product-specific architecture, sequencing, evidence gates, or terminology differ. Market/vendor details here must be reverified before use.
+
 Compiled from the competitive survey of FanGraphs, Baseball Prospectus, MoneyPuck, The Athletic, ESPN FPI/BPI, FTN/DVOA, Basketball-Reference, PlayoffPredictors, PlayoffStatus, Sports Club Stats, Inpredictable, Tankathon, Neil Paine, and the defunct FiveThirtyEight.
 
 ---
@@ -50,12 +52,12 @@ Secondary honors and byes.
 ### 8. Odds-over-season time-series charts
 Line charts showing each team's playoff probability evolving day by day. The single most-missed 538 feature.
 - **Best in class:** FanGraphs Playoff Odds Graphs (the canonical implementation)
-- **Build note:** Requires persisting a daily snapshot **from day one**. You cannot backfill this. Start writing snapshots before you build any UI.
+- **Build note:** Persist captured daily snapshots from day one. Retrospective reconstruction may be possible when exact cutoff inputs can be reconstructed, but it must be labeled separately from captured walk-forward history and retain full model/rules/input lineage.
 
 ### 9. Historical odds archive / date selector
 Rewind and view the odds as they stood on any prior date.
 - **Best in class:** FanGraphs has a date selector on the playoff odds page
-- **Build note:** Same storage requirement as #8. Also a natural premium/API feature.
+- **Build note:** Same storage requirement as #8. Also a natural archive/API feature; PlayoffOdds does not assume a paid tier at launch.
 
 ### 10. Preseason vs. current comparison
 Show how far a team has moved from preseason expectations.
@@ -109,19 +111,19 @@ A league-wide leaderboard of the highest-leverage games on tonight's slate.
 ### 19. Control-your-destiny indicator
 Whether a team clinches purely by winning out, regardless of other results.
 - **Best in class:** PlayoffStatus (green/red control indicators)
-- **Build note:** A deterministic graph problem, not a simulation output. Cheap and beloved.
+- **Build note:** A deterministic universal-outcome proof problem, not a simulation output. Dependency-heavy tiebreakers can make it expensive; timeout/unsupported must return unknown.
 
 ## E. Deterministic Status Features
 
 ### 20. Magic numbers / elimination (tragic) numbers
-The classic "any combination of our wins and their losses totaling N clinches."
+The classic "any combination of our wins and their losses totaling N clinches." Not every league/race admits one rival-independent scalar.
 - **Best in class:** Widely available, but rarely fused with probabilistic context
-- **Build note:** The gap is combining the deterministic clinch math *with* probability in one view — "magic number 6, and 87% likely to get there by Sept 22."
+- **Build note:** Combine proven deterministic conditions with probability, but use opponent/scenario vectors when no scalar is sound.
 
 ### 21. Clinch / elimination scenario enumeration
 "You clinch tonight if you win AND Seattle loses." Requires exhaustive tiebreaker-correct search.
 - **Best in class:** PlayoffStatus, PlayoffPredictors
-- **Build note:** Combinatorially expensive late in the season if done naively; needs pruning.
+- **Build note:** Requires a proof-safe dependency model and sound complete search/solver. Pruning must be proven safe; timeout is unknown, never a clinch.
 
 ### 22. Tiebreaker resolution
 Full implementation of head-to-head, division record, common opponents, strength of victory, and the rest.
@@ -143,7 +145,7 @@ Every strong incumbent is desktop-first. Tankathon and MoneyPuck are responsive;
 ### 25. Public API / downloadable data
 Clean, documented programmatic access to odds.
 - **Best in class:** Essentially nobody. BP offers subscriber spreadsheets; Neil Paine publishes Elo archives on GitHub; ESPN data is community-scraped
-- **Build note:** Serves the analytics niche, drives inbound citations (the currency that made 538 famous), and is a second revenue line.
+- **Build note:** Serves the analytics niche and drives inbound citations. PlayoffOdds launches its initial read surface free with attribution; monetization is not assumed.
 
 ### 26. Cross-sport unified coverage
 All four leagues in one consistent interface.
@@ -187,7 +189,7 @@ Every serious product in this space is the same three-stage pipeline:
 [Team strength model] → [Per-game win probability] → [Monte Carlo season simulation] → [Aggregate outcome counts]
 ```
 
-The simulation is commodity. **The differentiation lives entirely in stage 1 and in the presentation layer.** Nobody wins by having a better random number generator.
+Simulation mechanics alone are not a differentiator. Team-strength quality, official-rule correctness, reproducibility, historical lineage, conditioning/proof honesty, and presentation all affect trust.
 
 ## 2. Simulation counts in the wild
 
@@ -223,7 +225,7 @@ Roughly ordered by cost to build:
 
 **Market-blended** — Neil Paine's NBA "Composite Mode" blends his dual-Elo with FanDuel implied odds. Cheap accuracy boost, but it makes you partly derivative of the market rather than an independent voice.
 
-**Recommendation for v1:** Elo, or Elo blended with market, gets ~90% of the accuracy for ~10% of the effort and is transparent, which is a stated user demand. You can upgrade the model later. You cannot upgrade a missing time-series archive later.
+**Generic recommendation:** start with a transparent, measurable model. For PlayoffOdds, SportsCrunch anchors/ratings and captured immutable snapshots are already the decided direction; reconstructed history remains separately labeled.
 
 ## 4. Converting ratings to per-game win probability
 
@@ -233,7 +235,7 @@ Roughly ordered by cost to build:
 - **Score simulation:** for NHL and MLB you often need *scores*, not just outcomes, because tiebreakers use goal/run differential.
 
 **Sport-specific gotchas:**
-- **NHL:** three-point games. Simulating only W/L breaks the standings entirely. You must model P(regulation win), P(OT/SO win), P(OT/SO loss), P(regulation loss) — the loser point is load-bearing.
+- **NHL:** three-point games. Simulating only W/L breaks the standings entirely. When REG/OT/SO must remain distinguishable for standings, the terminal model has six classes: home/away winner × REG/OT/SO. The loser point and RW/ROW distinctions are load-bearing.
 - **MLB:** 162 games; starting-pitcher matchups matter enormously, which is the main reason MLB models use depth charts rather than team-level Elo.
 - **NFL:** 17 games means huge variance and the most brutal tiebreaker complexity (strength of victory, strength of schedule, common games).
 - **NBA:** the play-in tournament is a separate bracket stage. Basketball-Reference explicitly includes the play-in round in its 10,000 sims.
@@ -262,13 +264,13 @@ Inpredictable's definition: outcome uncertainty combined with how much the playo
 
 The problem: a user toggles a game and needs updated probabilities in under ~200ms. You can't run 100k sims per click.
 
-**(a) Conditional caching / stratified sims.** Run one large batch server-side. Store, per sim, the full outcome vector of remaining games plus the resulting playoff outcome. On a user pick, filter the sim set to matching sims and recompute. Fast and exact — but the surviving sample collapses as users pin more games (pin 10 games and you may have ~10 sims left out of 100k). Fine for 1–3 pins, useless for a full slate.
+**(a) Conditional caching / stratified sims.** Run one large batch server-side. Store, per sim, the full outcome vector of remaining games plus the resulting playoff outcome. Filtering gives a fast **conditional Monte Carlo estimate**, not an exact probability; expose branch count/ESS/uncertainty and fall back to direct conditioned simulation when the surviving sample is thin.
 
 **(b) Client-side simulation in JS/WASM.** Ship the win-probability matrix to the browser and run 1,000–5,000 sims locally per interaction. 1k sims gives ±1.5% — visibly noisy but acceptable with display smoothing. Zero server cost, instant feel, works offline. Probably the right answer.
 
 **(c) Hybrid.** Client-side for immediate feedback, then a server request for a high-precision result that swaps in a second later.
 
-Given your Laravel/PHP stack: run the heavy sim pipeline as a queued job (Python's numeric stack is better suited than PHP here), persist snapshots, and ship a compact precomputed matrix to the client for interactive work. The simulation engine does not need to live inside Laravel — it should be a separate worker producing artifacts your app serves.
+For PlayoffOdds, the confirmed engine is a pure shared TypeScript package running in supervised Node and browser workers. Laravel serves only locally published outputs; no simulation or SportsCrunch call runs in a normal request path. A future sidecar/WASM/Rust alternative requires measured justification.
 
 ## 8. Data sources
 
@@ -284,21 +286,12 @@ Platform-risk lesson worth internalizing: FiveThirtyEight died with Disney's cut
 
 MoneyPuck — a one-person operation — runs Python on AWS and updates many times a day. That's your proof point for scope: this is solo-buildable.
 
-- **Ingest job:** pull results and schedules on a cadence; update ratings incrementally.
-- **Sim job:** queued worker, 10k–100k sims per league per run. Vectorize with NumPy — simulate all games across all sims as one array operation rather than looping. A 100k-sim NHL season is seconds, not minutes, when vectorized.
-- **Snapshot store:** write a full odds row per team per day, forever. **The one thing you cannot backfill.** Do it before you have a UI.
+- **Upstream ingest:** SportsCrunch owns schedules/results, anchors and ratings; PlayoffOdds contract-tests and materializes the exact inputs at snapshot assembly.
+- **Sim job:** queued supervised TypeScript/Node worker for PlayoffOdds; simulation counts and vectorization strategy are benchmarked on representative bundles.
+- **Snapshot store:** retain captured daily outputs and exact canonical input bundles permanently. Retrospective backfill can add useful history only where cutoff inputs/rules/models are reconstructable and clearly labeled.
 - **Serving:** Laravel reads precomputed snapshots. No live simulation in the request path.
-- **Client:** ship the win-prob matrix for interactive sims.
+- **Client:** ship a complete compatible payload: remaining games/timing/site, ratings/state, standings baseline, bracket/PostseasonState, pinned rule artifact and engine-build contract.
 
-## 10. Build order implied by the above
+## 10. PlayoffOdds build-order application
 
-1. Ratings + per-game win probability for one sport
-2. Vectorized Monte Carlo with correct tiebreakers, verified against historical seasons
-3. **Daily snapshot persistence** — before anything user-facing
-4. Core odds tables + seeding grid
-5. Time-series charts (now possible, because snapshots exist)
-6. Interactive picker with client-side sims — the wedge
-7. Leverage feed + rooting guide — the daily hook
-8. Notifications + mobile
-9. Public API + historical archive — the citation engine and second revenue line
-10. Second sport, then third and fourth
+The generic catalog translates into the evidence-gated roadmap in [`90-build-order.md`](docs/plan/90-build-order.md): contracts and SportsCrunch rules/standings first; an MLB vertical proof then NFL; production immutable snapshot spine; accessible core UI plus a small anonymous API/MCP slice; beta/launch gates; then picker, leverage, NBA, NHL and proof-safe clinch work; hardened push, draft and developer-platform expansion later.

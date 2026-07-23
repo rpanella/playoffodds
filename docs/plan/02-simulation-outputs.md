@@ -1,133 +1,204 @@
-# 02 — Simulation Outputs, Snapshot Store & Backfill
+# 02 — Local Data Model, Snapshot Store, Publication, and Replay
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.**
-Proposed resolutions to Q6, Q7, Q8 (and the DB-naming open) are in §9.
+**Status: DRAFT v2 (2026-07-22) — contract/ERD level; physical indexes and encodings are Phase 1/2 benchmark outputs.**
 
-Everything the engine emits, how it's persisted, and how historical backfill works. Design rule: **every feature must be servable from stored outputs without re-simulation.** Features read this store; nothing user-facing ever waits on a sim (the browser picker being the deliberate exception, and it runs on a payload this store produced).
+PlayoffOdds serves every normal page/API response from local materialized data. SportsCrunch is an assembly-time upstream, never a request-time dependency (D40). Immutable snapshots and an atomic publication pointer separate computation from serving.
 
----
+## 1. Canonical terminology
 
-## 1. The snapshot concept
+These terms are binding across the plan (D42):
 
-A **snapshot** is one engine run over one league-season as of one instant, with full provenance. It is the unit of storage, serving, charting, and backfill.
-
-Two snapshot classes (proposed resolution to Q6, §9):
-
-- **Spine snapshots** — scheduled daily per active league at the league's natural instant (mirroring SportsCrunch's `snapshotInstant()`: NFL Sun 10:00 PT, daily leagues 09:00 PT). These form the **official time series**: charts, preseason-vs-now, the archive/date-selector all read spine snapshots only, so the historical axis has one point per day at a consistent time.
-- **Intraday snapshots** — event-driven re-sims as results land (webhook-triggered when games go final, debounced: run when the slate has been quiet ~30 min or every game in progress is final). These feed "right now" surfaces — current odds, leverage, notifications ("your odds jumped 12% tonight") — and are superseded by the next spine snapshot. NFL Sundays naturally produce several; that's a feature (odds visibly move as games final), not noise, because the chart spine stays daily.
-
-Anchor-only movement (lines moving with no games played) is picked up by the next spine snapshot in v1; an optional threshold-triggered refresh is a flag we can enable later without schema changes.
-
-## 2. Storage overview
-
-- **PlayoffOdds application MySQL DB** (its own database, new server — named `podds` to avoid any collision with the legacy `playoffodds` DB that SportsCrunch imports from): all Layer-1 aggregates + snapshot metadata. Aggregates are kept **forever** — they are the archive and the product.
-- **Artifact store** (local disk `storage/app/snapshots/...` first, S3-compatible layout so relocation is a config change): Layer-2 outcome matrices + client payloads, referenced by path from the DB.
-
-## 3. Snapshot metadata (table `snapshots`)
-
-| Column | Notes |
+| Term | Meaning |
 |---|---|
-| `id`, `league`, `season_year` | |
-| `snapshot_instant` | the as-of instant (UTC) — for backfill this is a past instant |
-| `class` | `spine` \| `intraday` \| `backfill` \| `adhoc` |
-| `engine_version`, `rules_version`, `params_version` | full reproducibility triple (engine package semver; era rule-set id per doc 04; calibration constants version per doc 01 §10) |
-| `n_sims`, `seed` | seed = stable hash of (league, season, instant) per doc 01 §11 |
-| `input_hash` | hash of the assembled SnapshotBundle — detects "inputs changed" vs "inputs identical" (jitter audits) |
-| `upstream_meta` JSON | which SportsCrunch calls fed it, their fetched-at times, counts of `is_projected` anchors (provenance + gap forensics) |
-| `artifact_path`, `payload_path` | Layer-2 binary + client payload locations (nullable for pruned/old snapshots) |
-| `backfilled` (bool), `status`, `created_at` | `status`: running/complete/failed |
+| `as_of` | Exact inclusive cutoff instant represented by inputs/results. It is not fetch time or publish time. |
+| snapshot | One immutable, versioned output and lineage set for a league-season at exact `as_of`. A correction creates another snapshot/revision. |
+| current | The snapshot referenced by the stable publication pointer for a league-season/surface. It changes atomically. |
+| spine | The one scheduled snapshot per league-day eligible for the canonical chart/history axis. |
+| intraday | Event-driven immutable snapshot between spine points; used for current/tonight/alerts, not the default daily chart axis. |
+| official | SportsCrunch/league-recognized standings status at exact `as_of`; unresolved live ties remain unresolved. |
+| `if_season_ended` | Standings/qualification/seeding obtained by applying final procedures to games complete at `as_of`. It may differ from `official`. |
+| retrospective reconstruction | Historical output assembled later from reconstructed inputs; not represented as originally published at the cutoff. |
+| captured walk-forward | Artifact assembled and retained when the cutoff was current, using then-captured inputs/builds. |
 
-## 4. Layer 1 — aggregates (MySQL)
+Fetch, assembly, simulation, and publish timestamps are separate fields. Public DTOs expose `as_of`, publish time, snapshot ID/revision, class, standings mode, reconstruction classification, and lineage IDs as applicable.
 
-### 4.1 `team_odds` — one row per (snapshot, team). The workhorse.
+## 2. Local domain materialization
 
-| Group | Columns |
+The following logical entities are required. JSON fields may hold versioned league-specific extensions, but stable identifiers, relationships, and fields used for filtering/serving are first-class columns.
+
+### 2.1 Identity and schedule spine
+
+| Entity | Required contract |
 |---|---|
-| Reach | `p_playoffs`, `p_division`, `p_wildcard` (path-split), `p_bye`, `p_best_record` |
-| Seeds | `p_seed` JSON array (index = seed; includes play-in distinctions for NBA) |
-| Advancement | `p_round` JSON array (made playoffs → won round 1 → … → champion; monotone cascade), `p_championship` (denormalized from it for indexing/sorting) |
-| Record | `wins_mean`, `wins_p10/p25/p50/p75/p90` (NHL: also `points_*`), `proj_record` display string |
-| Draft | `p_bottom` JSON (P(finish with j-th worst record)) — lottery math applied downstream (features/17) |
-| Context | `rating` (published, transparency), `sos_remaining` |
-| Status | `clinched_playoffs/division/bye`, `eliminated_*` (from deterministic mode, doc 04 — fused displays need both in one row) |
-| Movement | `d1_p_playoffs`, `d7_p_playoffs` (+ same for championship) — denormalized vs prior spine snapshots for movers/notifications feeds |
+| `leagues` | Stable code/ID, display metadata, timezone/snapshot policy reference, active flag. No hard-coded league count. |
+| `teams` | Local ID, stable SportsCrunch/provider ID, slug/name/abbreviation, active dates, display/mark asset reference and licensing status. Team identity is not season alignment. |
+| `seasons` | Local/provider IDs, league, year/label, start/end/status, timezone, upstream revision/checksum, selected current rule reference for diagnostics. |
+| `season_teams` | Stable local ID joining season/team; conference/division/group IDs and names, alignment effective metadata, upstream checksum. Games and standings reference this row to preserve relocations/realignments. |
+| `games` | Local/provider stable ID, season, home/away `season_team`, scheduled/actual start, season type, neutral/site, local current status, final scores, end type, upstream revision/checksum, observed/corrected timestamps. This is the local current game state for tonight/notifications. |
+| `game_change_events` | Immutable event/change ID, game, upstream request/source ID, observed/effective time, event kind, previous/new normalized state checksums, changed-field summary, correction/retraction link, and annotation text/code. Powers history annotations and stale-event suppression. |
 
-JSON arrays (vs child tables) because per-seed/per-round values are always read as a unit (heatmap rows, cascade displays) and never filtered on individually. Indexes: `(snapshot_id)`, `(league, season_year, team_id, snapshot_instant)` for time-series pulls.
+Every SportsCrunch refresh upserts materialized current entities transactionally and appends a change event when normalized material state changes. Webhooks enqueue/annotate work; a fresh pull determines state. Duplicate request IDs and identical content checksums are idempotent.
 
-### 4.2 `game_conditionals` — one row per (snapshot, near-term game, affected team)
+### 2.2 Snapshot and publication entities
 
-The leverage/rooting store (features/13): for each game within the **conditional horizon** (games in the next 7 days) and each team in the league: `p_playoffs_if_home_win`, `p_playoffs_if_home_loss`, `swing` (difference), `leverage` (swing × 2p(1−p)), plus the same for `p_division` where the affected team is in either club's division. Produced by partitioning the outcome matrix once (single pass over sims covers *all* games × *all* teams simultaneously — doc 01's `partitionByGame`).
+| Entity | Required contract |
+|---|---|
+| `snapshots` | Immutable ID, league/season, exact `as_of`, class, revision, reconstruction class, candidate status, idempotency key, bundle/result/payload checksums and paths, rules/schema/model/parameters/build IDs, seed/count, binary version, runtime envelope, warnings, parity result, correction/supersession links, assembled/simulated/published timestamps. |
+| `publication_pointers` | Stable key such as `(league, season, surface='current')`, referenced snapshot ID, monotonic pointer version, updated time. A single atomic update publishes all snapshot data. |
+| `snapshot_games` | One normalized row per game input/result in the snapshot: state as of cutoff, start/site/neutral, status, discrete result/end type, anchor value and declared semantics/source, projected/fallback flag, input checksum and lineage reference. Immutable. |
+| `snapshot_team_standings` | Snapshot, season-team, mode (`official`/`if_season_ended`), grouping/rank/shared-rank, qualification path, seed where meaningful, records/points/splits used by rules, resolved flag/warnings, authoritative/local values or parity checksum, ruleset/checksum. |
+| `snapshot_events` | Snapshot-to-change-event/annotation links with classification (result, line/model movement, schedule change, correction, clinch status) and display-safe summary. |
+| `snapshot_artifacts` | Typed artifact records (bundle, source response, rule payload, matrix, client payload, replay report) with content checksum, format/compression, size, retention class, storage location, verification state. |
 
-Volume check: 30 teams × ~60 games/week worst case (MLB) × ~2 tracked metrics ≈ 3.6k rows/snapshot — trivial. Rows with `|swing| < 0.1%` are dropped (noise floor at 100k sims, and nobody roots based on them).
+A database row never substitutes for the retained bundle bytes. Tables support serving/querying; artifacts support exact replay/audit.
 
-### 4.3 Time-series reads
+### 2.3 Product outputs
 
-Charts read `team_odds` across spine snapshots directly — no separate series table. A season of daily snapshots × 32 teams ≈ 6k rows/league/season: a covered-index range scan, cacheable aggressively since historical spine rows are immutable.
+| Entity | Required contract |
+|---|---|
+| `team_odds` | Snapshot/team probabilities for playoff/qualification path/division/seed/round/championship; record/points distributions; rating/SOS; deltas; explicit proof statuses (`proven`, `not_proven`, `unknown`, `not_applicable`) separate from probabilities. |
+| `game_conditionals` | Snapshot/game/affected-team conditional Monte Carlo estimates by outcome class, sample count/ESS, standard error/interval, swing/ranking metrics, method/version. |
+| `simulation_diagnostics` | Batch-level runtime, calibration/model version, primitive reach/fallback, invalid/unsupported counts, aggregate invariants, and uncertainty. |
+| `proof_results` | Later Phase 5E immutable target/team/status/method/dependency-graph/result/witness-or-counterexample/budget/timeout metadata. Not required for Phase 2 publication. |
 
-## 5. Layer 2 — outcome matrices (artifact per snapshot)
+Seed and round arrays may be JSON or child rows after query benchmarks; public DTOs remain stable either way. The public API is not a 1:1 export of these tables.
 
-Custom **versioned binary format, engine-owned reader/writer** (proposed Q7 resolution — no parquet dependency in the browser or Node for v1):
+### 2.4 Notification/local serving support
 
-```
-header: magic, format_version, snapshot_id, n_sims, game index (gameId[], chronological), team index
-outcomes: per game, n_sims bits (home win) — NFL/NBA/MLB
-          NHL: + 2 bits/sim end-type plane (REG/OT/SO)
-finishes: per team per sim, 1 byte: seed (0 = missed) | round_reached | champion flag | bottom-rank
-```
+`push_subscriptions`, preferences, delivery attempts, and notification candidates are specified in features/15 and doc 06. They reference local team/game/snapshot/event IDs only. The notification evaluator and tonight pages use `games`, `game_change_events`, `publication_pointers`, `team_odds`, and `game_conditionals`; they do not fetch SportsCrunch.
 
-Sizes at 100k sims: NFL ≈ 3.4 MB outcomes + 3.2 MB finishes; MLB (worst, full season remaining) ≈ 30 MB + 3 MB; gzip on disk roughly halves it. Comfortable.
+## 3. Canonical immutable `SnapshotBundle`
 
-**What it powers, all without re-simulation:** leverage/rooting partitions (§4.2 generation), server-side high-precision picker results (filter sims matching a user's pins → recompute aggregates over survivors; falls back to client sims when survivors < ~2k), clinch screening (features/14), and any future conditional question we haven't thought of yet — which is the real reason to keep raw sims, not just aggregates.
+Every successfully assembled candidate permanently retains one compressed canonical bundle after validation; every published snapshot must have one. The bundle contains exact normalized bytes for all engine inputs and comparison evidence:
 
-**Margins are not stored.** They exist transiently in-sim for tiebreaks/accumulators; finishes already encode their consequences. (Revisit only if a future feature needs conditional *margin* queries.)
+- bundle schema/canonicalization/compression version and identity;
+- teams, season-team alignment, all relevant games/results/anchors and exact cutoff semantics;
+- ratings/team state and every model/league parameter byte;
+- bracket configuration and full `PostseasonState`;
+- exact canonical rule payload, schema, selection response, IDs and checksums;
+- authoritative SportsCrunch standings responses for required modes;
+- normalized source lineage, response/artifact checksums, coverage, warnings, anomalies and corrections;
+- engine source/build ID, dependency/build-lock checksum, parameters/model checksums;
+- simulation seed/count/stream range, binary serialization version, and deterministic runtime metadata.
 
-**Retention:** artifacts kept for the **current season + 30 days**, then pruned (aggregates + payloads keep forever). Any pruned snapshot is exactly reproducible from the provenance triple + seed (§3) if ever needed — that's what reproducibility is for.
+Canonicalization defines field order, numeric representation, timestamp normalization, string encoding, null/absent semantics, array ordering, and hash algorithm. Compression is outside the canonical hash: checksum the canonical uncompressed bytes and also checksum the stored compressed artifact.
 
-## 6. Client payload (browser sims, features/12)
+Source response bytes required to audit normalization are retained as permanent referenced artifacts or embedded in the bundle. Secrets/authorization headers are removed before canonicalization and never retained.
 
-Per spine/intraday snapshot per league, a gzipped JSON artifact, immutable and CDN-cacheable (URL keyed by snapshot id):
+## 4. Retention and immutability
 
-```
-teams[], params (k, eta, marginSigma, nhl), rules_version,
-baseline: serialized SeasonAccumulators   ← computed server-side by the SAME engine code
-remainingGames[]: { id, date, homeId, awayId, baseLogit }
-seedBase
-```
+| Data | Policy |
+|---|---|
+| Published bundle, rule payload, lineage, snapshot metadata, aggregate outputs, publication/correction history | Permanent for the supported life of the product; backed up and restore-tested. |
+| Validated but failed/quarantined bundle | Retain at least through incident resolution and the operational audit window; checksum/schema/parity failures used as fixtures are promoted to permanent test artifacts. Exact duration is an ops policy, not silently pruned. |
+| Client payload for published snapshot | Permanent while its immutable URL/API snapshot remains supported. |
+| Raw outcome/finish matrix | All current-season snapshots plus 30 days after season completion per D17; then eligible for verified pruning. A backfill matrix may be pruned after aggregates/replay verification. |
+| Mutable materialized current rows | Retain current state plus immutable change/correction events; snapshots preserve historical state. |
+| Privacy/security/delivery logs | Minimized and time-bounded under doc 06/O5; never inherit permanent model-artifact retention. |
 
-Shipping the **serialized accumulator baseline** instead of the full played-game list keeps the payload small (MLB full-season game list is the bulk) while preserving doc 01's single-source-of-truth principle — the baseline is produced by the same `applyResult` code the browser would have run. **Doc 01 addendum (small):** `simulateSeason` accepts `{baseline, remainingGames}` as an alternative to the full-schedule bundle; the Node worker always uses full-schedule, the browser always uses baseline. Includes the MLB ordered intraleague logs and H2H matrix the tiebreakers need (~tens of KB). Budget: **< 100 KB gzipped** per league (MLB worst case; measure in Phase 2 and trim encoding if over).
+Pruning a matrix requires verified bundle availability, artifact checksum, replay compatibility metadata, aggregate checksum, and an auditable prune record. It never deletes the bundle or changes snapshot metadata. Compression/storage estimates are capacity hypotheses measured in Phase 0/2, not guarantees.
 
-## 7. Backfill pipeline
+## 5. Versioned binary matrices
 
-Re-run history through the same pipeline, one spine snapshot per past league-day:
+The format is engine-owned, columnar/bit-plane, endian- and bit-order-specified, and self-describing. It contains magic, format version, snapshot/bundle/build checksums, counts, stable game/team index maps, plane descriptors (semantic ID, width, offset, length, checksum), and optional-stat capability flags.
 
-1. For date D (at the league's snapshot instant): assemble the bundle **as of D** — anchors from `historical-odds?at=D`; results = games with final status and start time < D (the assembler must *mask* later games' scores from the full-season games response — and treat postponed/suspended games as they stood on D, using `game_changes`-style status if exposed, else conservative masking by start time); ratings from the new `ratings?at=D` endpoint (doc 03); **era rule set for that season** (doc 04); calibration constants as-of that season.
-2. Run the engine (same versions recorded); write `class='backfill'`, `backfilled=true`.
-3. Artifacts: backfill snapshots keep **payloads but not outcome matrices** (retention rule §5 — nobody runs leverage queries against 2021; reproducible if ever wrong).
+### Outcome planes
 
-Throughput: ~200 snapshot-days per league-season × 1 `historical-odds` call each = well inside the 30/min throttle (~7 min of API time per season); engine time dominates (< 60 s/snapshot ⇒ a league-season backfills overnight on one worker). **Consequence: no bulk-export or throttle exemption needed — softens doc 03's ask #4 to "nice to have."**
+- MLB/NBA decisive winner: 1 bit per simulation-game.
+- NFL W/L/T: 2 bits per simulation-game with one invalid/reserved code.
+- NHL six terminal classes (home/away winner × REG/OT/SO): 3 bits per simulation-game with two reserved codes.
+- Postseason planes use the league's required width and include only unresolved games/nodes represented by the format manifest.
 
-Ordering: current season first (launch charts), then previous season per league, then deeper as upstream coverage allows (D9).
+### Finish planes
 
-**Lookahead hygiene:** anything the bundle consumes must be as-of D — anchors, ratings, rules era, calibration constants. The one acceptable anachronism: current *team alignment* metadata for old seasons is wrong (relocations) — use `season_team` alignment for that season, which SportsCrunch already models per-season. Charts label backfilled ranges; methodology note published (features/11).
+The earlier “one byte per team finish” claim is withdrawn. A minimum illustrative base layout is:
 
-## 8. Serving
+| Field | Width | Semantics |
+|---|---:|---|
+| seed/path slot | 4 bits | `0` missed/not applicable; version defines league mapping. |
+| round reached | 3 bits | Versioned stage index. |
+| champion | 1 bit | Explicit flag, even if derivable. |
+| bottom/final rank | 6 bits | Supports up to 64 teams; version declares sentinel. |
 
-Laravel reads MySQL aggregates only; artifacts served as static immutable files. API resources for the site mirror these shapes 1:1 and become the public API's v1 surface later (features/16) — design resource names now as if public. No simulation in any request path.
+That base is **14 bits per simulation-team** before padding/index/header, or about 5.6 MB for 100k × 32 teams. Optional record/points/path planes add documented widths. Example raw full-schedule outcome upper bounds are roughly 6.8 MB for 272 NFL games at 2 bits, 30.4 MB for 2,430 MLB games at 1 bit, and 49.2 MB for 1,312 NHL games at 3 bits, before headers/optional planes. Actual remaining-game sizes shrink through the season.
 
-## 9. PROPOSED resolutions (owner review requested)
+These are byte-accounting examples, not storage promises. Phase 0/2 benchmarks record raw, compressed, transfer, decode, and filter sizes/times on representative bundles. Gzip/zstd ratios are hypotheses; no acceptance gate assumes “roughly halves.”
 
-| Q | Proposal | Rationale |
-|---|---|---|
-| Q6 (cadence) | **Daily spine + finals-triggered intraday** (§1); spine is the sole charting axis; anchor-only refresh deferred behind a flag | Consistent time series, live-feeling product, minimal machinery |
-| Q7 (matrix storage) | **Custom versioned binary, engine-owned, local disk with S3-ready layout** (§5); retention: current season + 30 days, aggregates/payloads forever; pruned snapshots reproducible via provenance triple + seed | No heavy format deps; sizes are modest; reproducibility beats hoarding |
-| Q8 (backfill depth) | **Launch = current + previous season per league; extend opportunistically** as upstream coverage allows (D9); per-day API assembly is fast enough that depth is a scheduling choice, not an architecture one | Overnight per league-season; throttle non-issue (§7) |
-| (outline) own DB | **Yes — `podds` application DB**, distinct name from the legacy `playoffodds` DB | Avoids the naming collision permanently |
+Readers reject unknown versions/planes unless the header declares a safe skippable extension. Stored semantics never change in place.
 
-New opens surfaced: exact payload encoding if MLB exceeds the 100 KB budget (measure first); whether intraday snapshots also write `game_conditionals` (lean yes — leverage should update as the slate resolves); as-of-D status semantics for postponed games in backfill (needs doc 03 confirmation of what `historical-odds` already handles vs what the assembler must mask).
+## 6. Aggregates and uncertainty
 
-## 10. Dependencies
+`team_odds` stores probabilities as decimal fractions in `[0,1]` with simulation count and method lineage. Seed/path/round values must satisfy versioned sum/monotonic invariants within a documented numerical tolerance. Proof status is never inferred from an aggregate equal to 0 or 1.
 
-- **Doc 01:** the `{baseline, remainingGames}` input variant (§6) — small addendum, flagged there when implemented; `partitionByGame` powers §4.2.
-- **Doc 03:** `ratings?at=` endpoint (backfill), games-as-of masking semantics, webhook debounce feeding intraday triggers; ask #4 (bulk export) downgraded per §7.
-- **Doc 04:** era rule-set selection per backfilled season; clinch/elimination flags for §4.1.
-- **Features 12/13/14:** consume §5 matrices, §6 payloads, §4.2 conditionals — their detail passes must not invent parallel stores.
+`game_conditionals` is a conditional Monte Carlo estimate. Each branch records raw/weighted sample count, ESS when weighting/stratification applies, standard error or interval, and suppression reason. Small-effect and low-ESS rows may be withheld from the public DTO but diagnostics remain local.
+
+Movement deltas reference explicit prior snapshots: 1-day/7-day normally compare spine-to-spine; intraday movement identifies its comparison anchor. A correction may produce a correction delta/event rather than pretending ordinary model movement.
+
+## 7. Atomic candidate lifecycle
+
+Candidate states are `assembling → validated → simulating → persisted → publishable → published`, with terminal `failed` or `quarantined`. Transitions are idempotent and append operational events.
+
+Publication transaction/gate:
+
+1. Bundle/source/rule checksums and schema are valid; required exact-cutoff inputs are complete.
+2. Authoritative PHP versus local TypeScript baseline has no material disagreement.
+3. Simulation completed under declared build/runtime/options; aggregate/binary invariants pass.
+4. Immutable snapshot rows and required artifacts are durably written and checksum-verified.
+5. Cache/index jobs needed for coherent serving are ready or version-keyed to the new snapshot.
+6. Atomically compare-and-swap `publication_pointers.snapshot_id` and increment pointer version.
+
+Failure before step 6 leaves the old pointer untouched. Failure after the pointer transaction triggers rollback to the previous verified pointer only through an audited pointer update; immutable bad artifacts remain for diagnosis and may receive a retraction/correction event.
+
+An idempotency key includes league, season, class, exact `as_of`, normalized input checksum, engine build, rule checksum, and parameter checksum. The same event/input cannot create duplicate snapshots. A corrected input at the same cutoff creates a new revision linked to the superseded snapshot.
+
+## 8. Spine, intraday, and historical selection
+
+- One configured league-day spine instant produces at most one published canonical revision. Corrections remain linked revisions; chart resolution chooses the latest non-retracted published revision for that spine key.
+- Intraday snapshots can become `current` but do not enter the default chart series. The next spine supersedes their current role, not their immutability.
+- `?date=` resolves to the latest valid spine at or before the requested league-local date and returns requested/resolved values explicitly.
+- Historical API access identifies spine versus intraday; it never conflates “latest snapshot before time” with the daily spine.
+- A stable snapshot ID fetch always returns that immutable revision; `current` may advance.
+
+## 9. Backfill and historical limitations
+
+Backfill uses the same handshake and retained bundle as live assembly. It classifies each input as cutoff-captured, reconstructed, substituted, missing, or corrected and records coverage/anomalies. Present schedule/model/config semantics in SportsCrunch can affect retrospective reconstruction. Therefore:
+
+- publish it as **retrospective reconstruction** unless every required input was captured at the cutoff;
+- distinguish evaluation using era-appropriate historical model parameters from a frozen modern model applied to history;
+- exclude or visibly degrade points with material unknown state rather than silently using today's final data;
+- preserve rule/model/input versions per point; and
+- communicate late source corrections as new revisions, never history rewrites.
+
+Launch depth remains current plus previous season where coverage/gates pass (D18), not a promise that every date is reconstructable.
+
+## 10. Replay verification and correction policy
+
+Replay is offline: load retained bytes, verify checksums, run the recorded compatible build/runtime/options, compare binary/aggregate checksums under the engine's declared envelope, and write a `replay_report` artifact.
+
+Minimum cadence/gates:
+
+- every newly published snapshot gets bundle/artifact checksum verification and a small deterministic smoke replay before or immediately after pointer advance;
+- the latest snapshot plus a rotating historical sample receive scheduled full replay;
+- every engine/rules/binary/runtime upgrade replays the golden corpus and a representative retained snapshot set before promotion; and
+- quarterly restore exercises replay at least one snapshot from backup without network access.
+
+A replay failure alerts and quarantines the implicated build/artifact from new publication. Existing immutable output is not silently edited. If product-visible data is wrong, publish a corrected snapshot/retraction annotation and make APIs/pages expose the correction link.
+
+## 11. Serving, DTOs, and failure behavior
+
+Laravel/request handlers read the current pointer and local tables/artifacts. Immutable responses cache by snapshot/checksum with ETags; current aliases use short cache lifetime/revalidation. No normal render performs a SportsCrunch call or simulation.
+
+If assembly/upstream/simulation fails, current continues to serve the last good snapshot with its actual timestamp and, when freshness crosses the product threshold, a visible stale/degraded banner. Missing current data yields a typed unavailable response; it does not fall through to upstream.
+
+Public/site/API/MCP DTOs are versioned product contracts defined in features/16, with stable IDs, decimal units, errors, and lineage. Database refactors must not leak into them.
+
+## 12. Phase 1/2 data gates
+
+- Migrations/ERD cover every entity above with uniqueness, FK/immutability, idempotency, and pointer constraints.
+- One MLB vertical snapshot retains canonical bundle/source/rule bytes; local standings match SportsCrunch; offline replay reproduces checksums.
+- Postseason-in-progress fixture materializes and resumes correctly.
+- Binary writer/reader has exact byte accounting, corruption/version tests, and measured compression/decode/filter benchmarks.
+- Failure injection proves parity/checksum/input failures cannot advance current.
+- Tonight/history/notification candidate queries run entirely from local data.
+- Backup/restore retrieves DB pointer/history plus artifacts and completes an offline replay.
+- Two-week Phase 2 soak meets agreed freshness, success, duplicate, correction, and replay-error thresholds before Phase 3 depends on the pipeline.

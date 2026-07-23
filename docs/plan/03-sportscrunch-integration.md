@@ -1,111 +1,169 @@
-# 03 — SportsCrunch Integration
+# 03 — SportsCrunch Integration Contract
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.**
-Proposed resolutions to Q9–Q11 are in §8. One new upstream ask surfaced by doc 04's verification work: game end-type exposure (§4.5).
+**Status: DRAFT v2 (2026-07-22) — implementation-ready contract; confirmed ownership boundary D30, endpoint delivery pending Phase 0.**
 
-The data contract between PlayoffOdds (consumer) and SportsCrunch (provider). Per D5: consume the Sanctum-authed `/api/v1` + webhooks; make small, well-specified additions to SportsCrunch rather than reading its DB. Per D9: SportsCrunch's data acquisition/completeness is its own roadmap — this doc specs only what PlayoffOdds *consumes* and the *new* upstream surface it needs.
+This document defines the system boundary, data lineage, publication handshake, and failure behavior between SportsCrunch and PlayoffOdds. It is a contract, not a claim that every endpoint already exists.
 
----
+## 1. Boundary and invariants
 
-## 1. Existing endpoints consumed (no upstream work)
+### SportsCrunch owns
 
-| Endpoint | Used for | Notes |
+- Canonical immutable, era-versioned rule definitions for standings record/points calculation, ordering, tiebreak procedures, qualification paths, and seed assignment.
+- Human-readable rule documentation and citations, the canonical JSON Schema, and shared conformance fixtures.
+- Rule selection by league, season, and explicitly modeled exception; rulesets never mutate. A correction produces a new ID/version/checksum.
+- The PHP generic rules interpreter and authoritative standings service for an arbitrary supported `as_of` instant.
+- Versioned teams, games, historical-odds, ratings/parameters, standings, and rule-artifact API contracts, plus signed event delivery.
+
+### PlayoffOdds owns
+
+- The TypeScript simulation engine and generic TypeScript evaluator for the canonical rule schema.
+- Local standings accumulators, simulated-result application, qualification/seeding, bracket/playoff simulation, and deterministic future-outcome proof searches.
+- Local materialization/cache, immutable snapshot publication, and permanent retention of exact input bundles and lineage.
+- Playoff bracket formats, playoff probability models, exact clinch-search algorithms, and draft/lottery rules initially. Moving one into the shared registry requires an explicit contract/version change.
+
+### Hard invariants
+
+1. Rule definitions are authored once in SportsCrunch and interpreted by two small parity-tested generic evaluators; league/year ladders are never duplicated in PlayoffOdds code.
+2. A published PlayoffOdds snapshot pins the exact rule payload and checksum. Later upstream correction never changes it.
+3. No SportsCrunch call occurs in a simulation hot loop, browser worker, or normal HTTP request/rendering path. Public reads use local published data only.
+4. Publication fails closed on schema/checksum failure, missing required input, or material authoritative-PHP versus local-TypeScript disagreement. The last good snapshot remains current.
+5. A rule artifact is content-addressable and immutable. Endpoint caching must not turn mutable aliases into snapshot lineage.
+
+## 2. Verified current reality and Phase 0 gaps
+
+SportsCrunch currently provides versioned season/team/game and historical-odds APIs plus signed webhook plumbing. Its historical-odds reconstruction can depend on the schedule, model code, and configuration available when reconstruction runs; it is not proof that every byte was captured at the historical cutoff. These are integration assumptions to verify with contract tests, not source-code guarantees owned by this plan.
+
+The following are **required upstream Phase 0 work and do not exist yet**:
+
+- Canonical rule registry, JSON Schema, cited documents, fixtures, immutable selection/versioning.
+- PHP rule interpreter plus authoritative `as_of` standings service with explicit modes.
+- Ratings/parameters at exact `as_of` (D20).
+- Any missing fields required by a supported league, including reliable season-team alignment, neutral-site/start/status/result data, NHL final end type, and MLB rule-selection exceptions such as an All-Star-break anchor when the ruleset needs one.
+
+Existing strengths to preserve: `/api/v1` versioning, authenticated service access, signed events, request IDs/deduplication, bounded retries, and conservative rate limiting. Endpoint and payload assumptions must be frozen in consumer-driven contract tests before Phase 1.
+
+Existing conceptual surface to verify and retain:
+
+| Existing endpoint/surface | PlayoffOdds use | Phase 0 verification focus |
 |---|---|---|
-| `GET /seasons` (`?league=`) | Season discovery; `has_market_lines` gates backfillable seasons | Cache daily |
-| `GET /seasons/{s}/teams` | Team identity + per-season conference/division alignment (seeding structure; handles relocations) | **Verify during implementation** that the resource exposes conference/division ids — the underlying `season_team` has them |
-| `GET /seasons/{s}/games` | Full-season schedule, statuses, scores, week, neutral flag; current blended odds + 24h deltas | Unpaginated full-season pull — fine, bundles want whole seasons |
-| `GET /seasons/{s}/historical-odds?at=` | **The anchor feed** — every unplayed regular-season game's odds as of `at` (real consensus or time-traveled projection), with `is_projected` | Throttle 30/min; regular season only |
-| Webhooks (`resource: games`, season-scoped) | Intraday snapshot triggers (D16); schedule-change awareness | Signed (`whsec_…`); `request_id` for idempotency; `sync` re-delivery on startup |
+| `GET /api/v1/seasons?league=…` | season discovery | stable IDs/status and cache semantics |
+| `GET /api/v1/seasons/{season}/teams` | team identity and season alignment | conference/division/group fields and historical alignment |
+| `GET /api/v1/seasons/{season}/games` | schedule, local game state and final results | exact starts, neutral/site, season type, corrections, scores/end type |
+| `GET /api/v1/seasons/{season}/historical-odds?at=…` | remaining-game anchors at cutoff | reconstruction semantics, coverage/warnings and real/projected provenance |
+| Versioned signed webhook APIs | enqueue intraday reconciliation | signature bytes/timestamp, request ID, replay/sync and retry behavior |
 
-## 2. Bundle assembly recipes (pipeline → engine)
+These rows describe current integration reality, not permission to depend on undocumented fields. Ratings, rules and standings below are additive required contracts.
 
-### 2.1 Live snapshot (spine or intraday), per league
+## 3. Required versioned endpoints
 
-1. `GET /seasons?league=X` → active season (cached).
-2. `GET /seasons/{s}/teams` → `TeamInput[]` (cached daily; alignment changes are rare and never mid-season).
-3. `GET /seasons/{s}/games` → full schedule: split `final` (results) vs `remaining` (status scheduled/live), statuses mapped conservatively (live/delayed games are *not yet final*: they stay "remaining" with their pre-game anchor — in-flight scores are ignored by v1 sims).
-4. `GET /seasons/{s}/historical-odds?at=<snapshot instant>` → per remaining game: `home_win_probability` + `is_projected` → `baseLogit = logit(p)`.
-5. `GET /seasons/{s}/ratings?at=<snapshot instant>` (**new endpoint**, §4.1) → ratings + league params (`k`, HFA).
-6. Assemble `SnapshotBundle` (doc 01 §3); record every call's timestamp/counts into `snapshots.upstream_meta` (provenance, doc 02 §3).
+Exact resource names may change during Phase 0; these semantics may not.
 
-Call budget: ≤5 requests per league per snapshot — throttle-irrelevant.
+### 3.1 Authoritative standings
 
-### 2.2 Backfill snapshot (as-of date D)
+`GET /api/v1/seasons/{season}/standings?at={ISO8601}&mode={official|if_season_ended}&trace={0|1}`
 
-Same recipe with `at=D`, plus **as-of masking** of the games response:
+Response contract:
 
-- The `historical-odds?at=D` response is the **authority on "remaining as of D"** — any game it returns was unplayed then, whatever the games endpoint now says about it (it may have been postponed/rescheduled later).
-- Games *not* in that response with `game_time < D` and status `final` supply results-as-of-D. Games later canceled/forfeited are taken at their current final disposition only if that disposition predates D; otherwise masked to remaining. (Edge cases here are rare and bounded; the assembler logs any game whose classification required a judgment call into `upstream_meta` for audit.)
-- Ratings, era rule set (doc 04), and calibration constants all selected as-of D — the lookahead-hygiene rule (doc 02 §7).
+- Identifiers: league, season ID/year, requested `at`, exact normalized `as_of`, and mode.
+- Ordered standings by the grouping relevant to the league, with stable team IDs.
+- Qualification status and assigned seeds where meaningful for the chosen mode.
+- Records, points, and all splits/derived values actually consumed by a tiebreak procedure; do not return only display totals.
+- Selected `ruleset_id`, rule version, schema ID/version, rule payload checksum, and fixture-set checksum.
+- Optional structured rule trace when requested.
+- Structured `warnings[]` for unresolved display ties, incomplete data, unsupported historical coverage, or degraded inputs.
+- Source/reconstruction lineage sufficient to compare and archive the response.
 
-### 2.3 Degradation rules (consume defensively, per D9)
+`official` means the table/qualification status the league recognizes at that instant. `if_season_ended` applies final qualification/seeding procedures to games completed by `as_of`. Those can legitimately differ during a season. Neither mode invents or randomly breaks an unresolved in-season display tie: it returns shared/unresolved ordering and a warning unless an official deterministic procedure applies.
 
-| Failure | Behavior |
+### 3.2 Selected rules and immutable artifacts
+
+- `GET /api/v1/seasons/{season}/standings-rules` returns the immutable artifact selected for that season plus the explicit selector/exceptions that caused the choice.
+- `GET /api/v1/standings-rules/{ruleset_id}` returns an immutable artifact by stable ID.
+
+Artifact contract:
+
+- `ruleset_id`, league, effective/applicable range, explicit exception selectors, version, and creation timestamp.
+- Canonical rule payload conforming to a named JSON Schema; canonicalization algorithm and payload SHA-256.
+- Human document identifier/URL, source citations and retrieval dates.
+- Fixture manifest plus checksums; fixtures cover every primitive/procedure used by the artifact.
+- Compatibility/minimum-interpreter version and declared capabilities/dependencies.
+- No mutable “latest” artifact may be archived as lineage; selection resolves to a concrete immutable ID/checksum.
+
+Conceptual artifact family: `rules/nfl/standings-2002-v1.json` with matching `.md` and `fixtures.json`. Storage layout is not the API contract.
+
+### 3.3 Games, teams, odds, ratings, and events
+
+PlayoffOdds consumes contract-tested versions of:
+
+- Season discovery and season-team identity/alignment (conference/division membership is season-scoped).
+- Full schedule/results with stable game IDs, actual start instant, neutral-site flag, season type, status/finality, scores, and league-required end type.
+- Historical anchors at exact cutoff with real/projected provenance and reconstruction warnings.
+- Raw ratings plus league parameters at exact cutoff, model identifier/version, and coverage warnings. PlayoffOdds derives matchup probabilities.
+- Signed game events. Verify signature, deduplicate by request ID, persist receipt/cursor, and use events only to enqueue refresh; a fresh pull remains authoritative.
+
+Current APIs must be treated as mutable external inputs until their normalized response bytes are captured in a `SnapshotBundle`.
+
+## 4. Snapshot assembly and publication handshake
+
+For every spine, intraday, backfill, or ad hoc candidate:
+
+1. Fetch the selected immutable rule artifact and validate its ID, schema, canonicalization, and checksum.
+2. Fetch authoritative SportsCrunch standings for the exact cutoff and required mode (normally both modes when they differ for product surfaces).
+3. Fetch games, season-team alignment, anchors, ratings/parameters, and every other required input at the same cutoff semantics.
+4. Normalize inputs and rebuild the played-game baseline locally with the TypeScript evaluator and pinned artifact.
+5. Compare authoritative PHP output and TypeScript output. Block publication on material disagreement; permitted presentational differences must be explicitly allowlisted and tested.
+6. Store the exact rule payload/checksum inside the compressed immutable `SnapshotBundle` alongside upstream standings responses, normalized inputs, raw-response artifact checksums/locations, and lineage.
+7. Run simulation/aggregation, validate outputs, write all immutable rows/artifacts, then atomically advance the stable publication pointer in one transaction/compare-and-swap operation.
+8. Ship that exact artifact to Node/browser only where required and only with an engine-build compatibility declaration.
+
+All simulation, proof evaluation, and browser evaluation is local and pinned. Rebuilding a snapshot later uses retained bytes, not fresh SportsCrunch calls.
+
+### Material parity
+
+Material agreement includes ordered/resolved positions, qualification paths, seeds, records/points/splits used by the rules, selected rule ID/schema/checksum, and unresolved status. Numeric normalization tolerances are declared per field; there is no blanket fuzzy comparison. A trace mismatch with identical outputs is warning-level until trace equivalence becomes a contract gate. Any output mismatch that can alter qualification or seed is publication-blocking.
+
+## 5. Rules conformance program
+
+The two-interpreter design is intentional: PHP belongs in SportsCrunch; TypeScript is required by PlayoffOdds Node workers and browser use. A Node sidecar, default microservice, Rust, or WASM is not the baseline; it can be reconsidered only after measured complexity or performance warrants it.
+
+Required automated suites:
+
+- JSON Schema and canonical-checksum validation for every artifact.
+- Shared fixtures for every primitive and procedural behavior.
+- Golden official historical seasons and curated edge cases across era boundaries.
+- Differential PHP-versus-TypeScript evaluation of the same artifact, fixture, and input state.
+- Consumer-driven HTTP contract tests for selection, standings modes, exact `as_of`, warnings, errors, caching, and immutability.
+- Preseason source review: a change produces a new artifact/version/checksum, never an edit in place.
+
+## 6. Failure and degradation contract
+
+| Condition | Required behavior |
 |---|---|
-| Upstream unreachable at spine time | Retry ×3 with backoff → mark snapshot `failed`, alert; **never** publish partial odds; site keeps serving the last good snapshot |
-| Some remaining games missing anchors | Engine prices them from ratings (`k·Δrating + hfaLogit`) — the same math as playoff games; per-game `anchorSource` recorded; alert if > 5% of slate |
-| All anchors `is_projected` beyond the market horizon | Normal (books don't post full-season lines) — no action; `is_projected` counts logged per snapshot |
-| Season status not `active` upstream | Skip league, alert (upstream crawlers are gated on active status — stale data risk) |
-| Webhook delivery gap | Spine snapshot is the daily catch-all; a `sync` request re-baselines after any suspected gap |
+| Upstream unavailable/timeout/rate-limited | Bounded retry with jitter; candidate fails; last published pointer remains; alert with request ID. |
+| Required input missing or cutoff semantics disagree | Quarantine candidate; do not substitute current values silently. |
+| Rule schema/checksum/selection invalid | Block publication and browser payload creation; P1 alert. |
+| PHP/TypeScript material mismatch | Quarantine full bundle and diff/trace for diagnosis; P1 alert; no pointer change. |
+| Optional anchor missing | Use a ratings-derived fallback only if league policy allows it; label per-game source, quantify affected share, and fail above a Phase 0-set threshold. |
+| Unresolved in-season tie | Preserve shared/unresolved status and warning; never randomize a public official table. Simulation-only random terminal behavior must be rules-authorized and seeded. |
+| Late correction | Ingest as a new candidate with correction/event lineage; publish a new snapshot only after all gates. Never rewrite prior snapshots. |
+| Webhook gap/duplicate | Deduplicate by request ID; scheduled spine is the reconciliation path; replay/sync re-baselines locally. |
 
-## 3. Webhook consumption (intraday triggers, D16)
+Service authentication uses a least-privilege PlayoffOdds token stored as a secret, never in bundles/logs. Logs may contain route templates, status, timing, request ID and content checksum, but not bearer tokens or unnecessary payloads.
 
-- One subscription per active league season, `resource: games`.
-- Verify signature; dedupe on `request_id`; persist last-processed cursor.
-- **Debounce:** on a `final` transition, start/extend a 30-minute quiet-window timer per league; when it fires (or when every in-progress game has gone final), enqueue one intraday snapshot. Ten near-simultaneous finals ⇒ one re-sim.
-- Schedule-change events (postponements, game_time moves) don't trigger re-sims by themselves; they're picked up by the next snapshot's fresh games pull.
+## 7. Historical semantics
 
-## 4. New SportsCrunch surface (the asks) — specs to hand upstream
+Backfill assembly must record whether each upstream response came from data captured at the cutoff or from retrospective reconstruction. Present schedule state, source corrections, model code, and configuration can change a reconstruction. PlayoffOdds therefore labels the resulting product according to D34 and archives coverage/anomaly/correction metadata. A response for `at=D` is not by itself evidence of true walk-forward state at D.
 
-### 4.1 Ratings & params endpoint (the one hard dependency)
-`GET /api/v1/seasons/{season}/ratings?at={ISO8601, optional, default now}` →
-```json
-{ "success": true, "data": {
-    "as_of": "…",
-    "params": { "sigmoid_k": 2.4, "home_field_win_probability": 0.55 },
-    "teams": [ { "team_id": 12, "rating": 0.183 }, … ],
-    "model": { "predictor": "RecentOddsPredictor", "version": "…" } } }
-```
-Implementation note for upstream: this is a thin serialization of `Season::gamePredictor()`'s power-rankings array plus `League::gamePredictorConfig()` values; the `?at=` variant reuses the same time-travel machinery the predictor backtester already uses (`PeriodTimeTraveler`). Powers playoff-matchup pricing (doc 01 §8), anchor-fallback pricing (§2.3), the transparency page (features/10), and backfill (doc 02 §7). Throttle like historical-odds.
+When a historical status/reschedule/correction cannot be reconstructed safely, the assembler records `unknown` and either excludes that point or fails the candidate according to materiality. It never infers a precise historical state from today's final row without lineage.
 
-### 4.2 `is_projected` on the games endpoint
-Expose the existing `market_line_types` semantics as a boolean on `GameResource` (bit 1 unset ⇒ projected). Today only historical-odds reveals it; the live surface should match. (PlayoffOdds primarily reads anchors from historical-odds anyway — this is belt-and-suspenders plus general API hygiene.)
+## 8. Phase 0 acceptance gate
 
-### 4.3 MLB All-Star break date per season
-The MLB tiebreaker "last half" anchors at the All-Star break (doc 04 A.2). Ask: add `all_star_break_date` (nullable, MLB-only) to `SeasonResource`. Fallback if declined: derive from the schedule's mid-July gap ≥ 3 days with no MLB games — workable but brittle across eras; the explicit field is strongly preferred.
+Phase 1 cannot claim trustworthy standings simulation until:
 
-### 4.4 Postseason pricing — no upstream work (proposed Q11 resolution)
-Playoff *matchups* are priced entirely from ratings + in-sim deltas (D14); actual postseason games' schedules/results flow through the existing games endpoint once scheduled. `historical-odds` staying regular-season-only is **fine** — withdraw the "extend historical-odds to postseason" idea.
+1. The canonical schema, current MLB and NFL artifacts/docs/fixtures, selection rules, and immutability behavior exist upstream.
+2. Both standings modes and exact-cutoff behavior pass consumer contract tests.
+3. PHP/TypeScript differential tests pass all shared fixtures and at least the agreed golden/edge corpus with zero material mismatches.
+4. One MLB candidate bundle completes the full handshake, is replayed without network access, and produces the same normalized baseline and aggregate checksums under the pinned build/runtime contract.
+5. Failure injection proves invalid checksum, parity mismatch, missing required input, and upstream outage cannot advance the publication pointer.
 
-### 4.5 Game end-type exposure (NEW — surfaced by doc 04 verification)
-NHL accumulators need **regulation vs OT vs SO** per played game (RW/ROW columns), and the OT-model calibration (doc 01 §7) needs the same historically. The `games` table's `period` column (>3 ⇒ extra time) plus parsed end-type strings exist upstream; ask: expose `end_type: "REG" | "OT" | "SO"` (nullable, NHL; `OT` for NFL tie-adjacent finals is derivable from scores and not needed) on `GameResource`. Without this, NHL standings state cannot be built — **this is a hard dependency for NHL onboarding (Phase 5), though not for Phase 1 (MLB/NFL)**.
-
-### 4.6 Nice-to-haves (not blocking anything)
-- Bulk backfill export — downgraded (doc 02 §7: per-day assembly fits the throttle).
-- NFL per-game touchdown counts, only if ESPN data already carries them — powers the deterministic net-TD tiebreak step (doc 04 §5); never simulated.
-
-## 5. Auth & tokens
-
-Sanctum personal access token minted upstream via `api:token` (same pattern as poolcrunch), stored in `podds` env. One token, named `playoffodds`. All calls `Authorization: Bearer`. No user-level auth flows anywhere in the pipeline.
-
-## 6. Provenance & auditability
-
-Every snapshot's `upstream_meta` records: request URLs + fetched-at timestamps, response counts (games, anchors, projected/real split), ratings model version, and any degradation-rule activations (§2.3). This is what makes "why did Tuesday's odds look weird?" answerable six months later.
-
-## 7. Sequencing with 90-build-order
-
-Phase 0 upstream work, in priority order: **4.1 ratings endpoint** (blocks Phase 1 playoff pricing + all backfill), 4.3 ASB date (blocks MLB tiebreakers in Phase 1 — or ship the schedule-gap fallback first), 4.2 flag (any time), 4.5 end-type (blocks Phase 5 NHL only), 4.6 whenever. All are small: 4.1 is the only one touching non-trivial upstream code, and it wraps machinery that already exists.
-
-## 8. PROPOSED resolutions (owner review requested)
-
-| Q | Proposal | Rationale |
-|---|---|---|
-| Q9 (ratings endpoint shape) | **Raw ratings + league params** (§4.1), not a matchup-probability service | One cheap endpoint serves pricing, fallback, transparency, and backfill; matchup math lives in the engine where deltas exist |
-| Q10 (backfill mechanism) | **Per-day API assembly** (§2.2) — no bulk export, no throttle change, no direct-DB exception to D5 | Doc 02 §7 throughput math: a league-season backfills overnight, ~14 min of API time |
-| Q11 (postseason anchors) | **Ratings-side pricing; no upstream postseason work** (§4.4) | D14 already prices brackets from ratings + deltas; historical-odds stays as-is |
-
-New opens: none promoted to 99 — §4.3's schedule-gap fallback and §2.2's edge-case masking rules are implementation details with defined defaults.
-
-## 9. Dependencies
-
-Feeds doc 01 (bundle schema §3), doc 02 (assembly, provenance, backfill), doc 04 (ASB date, end types, era selection inputs). Consumed by 90-build-order Phase 0 (the asks) and Phase 2 (pipeline build).
+NHL onboarding additionally gates on reliable REG/OT/SO final-state data. Historical era coverage gates only the corresponding backfill range, not current-season MLB/NFL work.

@@ -1,51 +1,82 @@
-# Features 11 — History & Time Series
+# Features 11 — History, Time Series, and Archive Semantics
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.** Covers reference-doc features #8, #9, #10. Reads spine snapshots only (D16) — the daily axis is the whole point. The backfill advantage (00 §4, D18) makes this a launch-day differentiator instead of a year-two feature.
+**Status: DRAFT v2 (2026-07-22).** Phase 3 ships one basic spine chart and archive semantics; deeper visualization is incremental.
 
----
+## 1. Time-series contract
 
-## 1. The odds chart (#8) — the marquee component
+The default chart axis contains one resolved **spine** snapshot per league-day. Intraday snapshots are available through explicit snapshot/API access and current movement features but do not create irregular default chart points.
 
-One reusable `OddsChart` component (shared `ui/` package, doc 10 §7):
+Each point carries:
 
-- **X-axis:** league period (weeks for NFL, dates for daily leagues), spanning the season; preseason snapshot as the left edge once available.
-- **Y-axis:** 0–100%, fixed (odds charts must be comparable across teams/seasons — no auto-scaling).
-- **Series:** the selected metric per team — `p_playoffs` (default), `p_division`, `p_seed[1]`, `p_championship` selectable via segmented control. Data = `team_odds` rows across spine snapshots (doc 02 §4.3), one point per day.
-- **Overlays:** team page defaults to division rivals (muted) behind the subject team (accent); league view supports pick-any-teams compare (max ~6 for legibility).
-- **Hover/tap annotations:** each point joins to the games that resolved between it and the prior spine snapshot — "Oct 12: beat GB 27–20 (+4.1%)". Days with movement but no games get a "line movement" tag (doc 01 §11's result-driven vs line-driven distinction, derivable from `upstream_meta` anchor deltas). Clinch/elimination days get a milestone marker (`x`/`e` glyph on the line).
-- Mobile: tap-and-drag scrubbing with a fixed readout row above the chart (no hover dependence); pinch/zoom deliberately omitted — season-at-a-glance is the product.
-- Implementation note: chart library chosen at Phase 3 with the dataviz skill loaded; requirements it must meet — SVG or canvas SSR-safe placeholder, <15KB added to bundle preferred (uPlot-class or hand-rolled SVG; not a 300KB charting suite for line charts).
+- immutable snapshot ID/revision, exact `as_of`, publish time and spine key;
+- probability/metric value and simulation/method lineage;
+- rules/model/parameter/build IDs;
+- captured walk-forward, retrospective reconstruction or frozen-modern-model classification;
+- coverage/degraded/correction warning; and
+- links to local `snapshot_events` for result/schedule/model/correction annotations.
 
-## 2. Date selector / archive (#9)
+When multiple revisions exist for a spine key, the normal chart resolves to the latest non-retracted published revision and exposes its correction relationship. Immutable snapshot fetch retains the earlier revision; history is corrected by linked publication, not mutation.
 
-Every league page accepts `?date=YYYY-MM-DD` → renders **that day's spine snapshot** — table, matrix, and team pages all time-travel with one query param, because pages are already pure functions of `snapshot_id` (doc 10 §1). UI: a compact date control in the "as of" header slot; URLs are shareable/citable permalinks ("here's what the odds said on deadline day"). Immutable snapshots ⇒ these pages cache forever. Out-of-range or missing dates fall to the nearest earlier spine snapshot with a notice. This is also the public API's archive semantics later (features/16) — same parameter, same meaning.
+## 2. Basic Phase 3 chart
 
-## 3. Preseason vs. current (#10) — movers
+- Fixed 0–100% probability axis and league-date/week axis.
+- One selected team/metric with an optional small comparison set after accessibility/performance gates.
+- Visible exact value/readout for keyboard, pointer and touch; no hover-only information.
+- Adjacent semantic data table/download containing date, value and warnings.
+- Result annotations join local game/change events between spine cutoffs. “Line/model movement” appears only when lineage proves input movement without a result; otherwise use neutral “model/input update.”
+- Clinch/elimination milestone appears only from official/proven status with source, never from sampling 0/1.
 
-- **Movers module** (home + league hub): biggest risers/fallers over selectable windows — 1d, 7d, season-to-date (vs. the season's first spine snapshot). Direct reads of the delta columns + a season-open self-join.
-- Framing rule: always show the pair ("62% → 34%"), not just the delta — the story is the journey.
-- This module is the recurring-content engine: its top entries feed notification candidates (features/15) and the home dashboard's daily narrative.
+Additional metrics, overlays, chart-image sharing and multi-season polish follow after the basic component meets no-JS/accessibility/mobile budgets.
 
-## 4. Backfill presentation & honesty
+## 3. Date, season, current, and immutable access
 
-- Backfilled spine rows (`backfilled=true`, D18: previous season at launch, deeper later) render **identically** in charts — the data is honest by construction (as-of-date inputs, era rules, no lookahead; doc 02 §7) — but the chart footer shows "odds before {first-live-date} computed retroactively from historical market data" linking to the methodology note on `/model`.
-- The methodology note states plainly: what was reconstructed (anchors, ratings, rules eras), what wasn't knowable (nothing — that's the claim), and the calibration evidence (doc 01 §10 coverage tests).
-- Prior-season pages (`/{league}?season=2025`) reuse everything: a season selector next to the date selector, reading the same immutable rows.
+- `current` resolves the atomic league-season pointer, which may reference an intraday snapshot.
+- `?date=YYYY-MM-DD` on normal archive pages resolves to the latest valid spine at or before the requested league-local date. UI/API return both requested and resolved date/`as_of`.
+- An immutable snapshot identifier resolves exactly that revision and never follows current or later corrections.
+- `season` selects the local season; season-team identity/alignment comes from that season, not today's team metadata.
+- Out-of-range, missing, retracted and materially degraded dates return explicit typed behavior. They do not silently substitute present values.
 
-## 5. Sharing (#31-adjacent)
+Canonical/current/archive URL policy follows doc 05. Share state includes season/date/team/metric/compare set without leaking internal mutable indexes.
 
-- **OG cards at launch:** server-rendered share images per team page and league page — template: team mark/colors, hero number ("Vikings playoff odds: 52.9%"), 1d delta, date, site mark. Static-template rendering (headless Chrome or an image lib) into a cached PNG per (page, snapshot).
-- **Chart-image shares (v1.1):** rendering the actual odds chart into the OG card — higher effort, do after launch.
-- Every chart gets a "copy link" that preserves full state (`?date=`, `?season=`, compare set, metric) — URL-addressable state is a hard requirement on the components.
+## 4. Historical honesty
 
-## 6. Data access
+Three labels are mandatory (D34):
 
-Site API resource: `GET /api/site/{league}/series?teams=…&metric=…&season=…` → `[ {team_id, points: [[instant, value], …]} ]`, spine rows only, immutable-cached. One covered index query (doc 02 §4.3). No client ever queries snapshots generically — named resources only, so the public API (features/16) can mirror them 1:1.
+1. **Captured walk-forward:** required inputs and build were retained when the cutoff was current.
+2. **Retrospective reconstruction:** assembled later; SportsCrunch historical odds and status can reflect schedule, corrected source data, model code or configuration available at reconstruction time.
+3. **Frozen-modern-model evaluation:** intentionally evaluates history under one newer fixed model; it is an analysis series, not “what the odds were.”
 
-## 7. Launch scope (PROPOSED)
+Every historical point records input coverage, missing/substituted data, anomalies/corrections and exact model/rules versions. The product never says “nothing was unknowable.” A true status-history or calibration claim requires evidence that the corresponding cutoff inputs were captured.
 
-**In for NFL launch:** team-page chart with annotations, league compare view, date selector, movers module, backfilled previous season (D18), static-template OG cards, methodology note. **v1.1:** chart-image OG cards, multi-season selector UI polish (data supports it day one). Rationale: the chart + archive are the "538 is back" moment and the whole point of the backfill work; OG chart images are additive polish.
+Methodology text explains whether calibration parameters are era-appropriate/walk-forward or modern/frozen. It does not compare scores from mixed experiment designs as if equivalent.
 
-## 8. Open questions
-- Annotation coverage for backfilled seasons: game-result joins work identically (results are in the DB); "line movement" tags need `upstream_meta` from backfill runs — confirm the backfill pipeline records it (doc 02 §7 says yes; verify in Phase 2).
-- Whether the home dashboard shows cross-league movers merged or per-league tabs *(lean: merged, ranked by |Δ| — it's the "what happened in sports last night" page)*.
+If a postponed/suspended/finality state cannot be reconstructed materially, exclude the point or show degraded/unknown according to doc 02 policy; do not infer precise cutoff state from today's final schedule row.
+
+## 5. Movement and annotations
+
+- 1-day/7-day movements compare named spine snapshots; current intraday movement states its spine/current comparison explicitly.
+- Always show the endpoints (“62.0% → 34.0%”) plus delta and exact cutoffs.
+- A late correction uses a correction/retraction annotation, not ordinary team-performance framing.
+- `game_change_events` and `snapshot_events` supply local schedule/result/correction data; no historical page calls SportsCrunch.
+- Multiple causes may be listed. If attribution cannot be separated, say “model/input update” rather than invent a causal result/line story.
+
+## 6. Backfill gates and scope
+
+Launch target remains current + prior season only where bundle/parity/replay/coverage gates pass (D18). Depth is bounded by trustworthy reconstructability, not API availability alone.
+
+A backfilled point must have a permanent canonical bundle, selected era rule artifact, authoritative/local parity outcome, model/parameter lineage, reconstruction classification and coverage report. A failed material cutoff stays absent/degraded. Backfill outcome matrices may be pruned under doc 02, but bundle/aggregates/history remain.
+
+## 7. API and caching
+
+The small v1 API exposes basic spine series by stable team/metric/season with cursor or bounded range, decimal units and immutable snapshot references. It does not expose database rows 1:1. Current aliases use short revalidation; immutable series/revisions use ETag/content checksum and long caching.
+
+Series pagination/order, requested/resolved date, empty coverage, correction and unsupported metric errors are specified in features/16. MCP fetch returns the same semantics and canonical URL.
+
+## 8. Acceptance
+
+- No intraday point leaks into the default spine series.
+- Requested/resolved/corrected/retracted fixtures behave identically across HTML/API/MCP.
+- Captured/reconstructed/frozen-modern labels are present and tested; methodology links name input/model/rule versions and limitations.
+- Chart and data table pass keyboard/touch/no-JS/reduced-motion/contrast checks and show warnings without color-only encoding.
+- Backfill with unknown material status fails or degrades visibly; source correction creates a new revision/annotation.
+- Queries read local covered indexes/materialization within the Phase 3 performance budget.

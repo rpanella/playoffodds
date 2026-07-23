@@ -1,48 +1,138 @@
-# Features 14 — Clinch, Magic Numbers & Elimination
+# Features 14 — Proof-Safe Clinch, Elimination, Control, and Magic
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.** Covers reference-doc features #19, #20, #21 (#22 tiebreaker correctness lives in doc 04). The deterministic layer, fused with probability — "magic number 6, and 87% to get there by Sep 22" — a combination almost nobody ships.
+**Status: DRAFT v2 (2026-07-22).** Phase 5E only. Phase 2/3 store probabilities and official status; they do not claim PlayoffOdds mathematical proof.
 
-All deterministic answers come from the doc 04 engine in deterministic mode (real results only, tiebreaker-exact, era rules). Probabilistic companions come from the outcome matrices (doc 02 §5). Nothing here has its own model.
+## 1. Safety invariant
 
----
+A positive clinch/elimination/control/magic guarantee is published only when a deterministic solver has proved the quantified statement over every legal remaining outcome under the pinned rules, schedule and postseason state. Monte Carlo screening, record bounds and bounded enumeration are heuristics/candidate reducers—not proof by themselves.
 
-## 1. Clinch/elimination flags (the foundation)
+Statuses are explicit:
 
-Computed at every snapshot per team per target — playoffs, division, bye/top-seed, each seed threshold, and eliminated-from each: written to `team_odds` status columns (doc 02 §4.1), rendered as the classic `x/y/z/e` badges (doc 10 §2), and gating the 100%/0% display honesty rule.
+- `proven`: complete proof with method/version/dependency graph and witness/certificate metadata;
+- `disproven`: a valid counterexample world exists;
+- `unknown`: timeout, resource limit, missing input or unsupported dependency;
+- `not_applicable`: target/procedure has no meaning in this context.
 
-**Method — tiered, cheapest first:**
-1. **Sim screening:** if any of 100k sims has the team missing the target, it is not clinched (and vice versa for elimination). Screens out ~all cases instantly; a target with 100k/100k sims is a *candidate* clinch, never a verdict (100k sims ≠ proof).
-2. **Arithmetic bounds:** pessimistic/optimistic record bounds (team's floor vs rivals' ceilings, tiebreaks assumed lost / won respectively). Conclusive for most candidates.
-3. **Exact adversarial check:** only for candidates the bounds can't settle — search over remaining relevant games' outcomes for any world where the target fails, with pruning (relevant games only: those involving teams whose ceiling/floor crosses the subject's bound — late-season this is a handful; mid-season step 2 always settles it). Deterministic engine evaluates leaf standings. If the search space exceeds a budget (~2²⁰ leaves after pruning), report "not yet decidable" and keep the probabilistic display — with a logged counter (expected ~never; the budget exists so the pipeline can't hang).
+UI/API never converts `unknown` to false/true and never labels probabilistic 100.0% “clinched.” Official league-recognized status is separately labeled `official` with SportsCrunch lineage.
 
-Flags must match the leagues' official clinch announcements — a parity check worth automating: when a league publishes x/y/z updates, any mismatch is a P1 bug (or a rules-file error). Forfeits/suspended games follow the era rule files.
+## 2. Targets and quantified questions
 
-## 2. Magic & tragic numbers (#20), fused with probability
+Each proof names a league, season, exact snapshot/rules checksum, team, target and quantifier:
 
-- **Definition (exact, tiebreak-aware):** magic number M for target = the smallest M such that *any* combination of team wins + key-rival losses summing to M guarantees the target under **pessimistic tiebreaks**. Computed from the arithmetic-bounds machinery (§1.2). Where optimistic tiebreaks would clinch earlier, the UI notes "could clinch sooner via tiebreakers" — honest about the band instead of pretending one number.
-- **Fusion:** next to every magic number, the probabilistic ETA from the sims: **P(target is reached at all)** = the existing aggregate; **clinch-date distribution** = per sim world, the date the simple magic-number arithmetic hits zero (a documented approximation — running the full deterministic engine per sim-day is not worth it; the arithmetic date is within a day of truth in practice, and the real-world flag §1 is always exact). Displayed: "Magic number **6** · 87% to clinch · median clinch date **Sep 22**."
-- Tragic (elimination) numbers mirror everything with roles reversed.
+- clinched target: no legal completion makes the team fail the target;
+- eliminated target: no legal completion makes the team attain the target;
+- control: with a declared set of the team's outcomes pinned favorably (for example, win out), no completion of other games makes it fail;
+- tonight scenario: a declared combination of current-slate outcomes makes target proof true regardless of later legal outcomes; and
+- magic guarantee: a formally defined set/vector of future team/rival outcomes sufficient to guarantee the target.
 
-## 3. Control-your-destiny indicator (#19)
+Targets include qualification, division/path, bye/top seed or a seed threshold only where the pinned artifact/bracket gives them precise semantics.
 
-"Win out ⇒ in, regardless of anyone else": the §1 machinery with the team's remaining games pinned to wins — screening via sims where the team won out (late season there are enough such worlds to screen; when the filter is thin the arithmetic bound almost always settles it, because winning out mid-season is overwhelming), then bounds, then exact adversarial if needed. Rendered as the PlayoffStatus-style green/red chip on team pages and the league table's expanded row: **"In control"** / "Needs help" — with "needs help" linking to the rooting guide (features/13) for *what* help, and the picker (features/12) to explore it.
+## 3. Explicit dependency graph
 
-## 4. Clinch/elimination tonight — scenario sentences (#21)
+The pinned rule artifact declares dependencies for every primary metric/tiebreak step. The proof builder composes them with schedule/bracket dependencies:
 
-The shareable output: **"CLE clinches tonight if: CLE win AND SEA loss."**
+- direct team/rival W/L/T or multi-valued outcomes;
+- head-to-head/group/common-opponent records;
+- opponent and defeated-opponent future records (NFL SOS/SOV);
+- score/margin/touchdown/goal statistics where procedures require them;
+- cross-group eligible-team membership or division-winner precedence;
+- NHL regulation/extra-time/loser-point classes;
+- postseason/play-in results when the target/order depends on them; and
+- any rules-authorized draw/random terminal, modeled as nondeterministic adversarial possibilities for guarantee proofs unless official semantics say otherwise.
 
-1. **Trigger check (cheap, every snapshot):** partition sims by tonight's outcomes — if no combination of tonight's results produces a clinch/elimination flag by §1's screening, nothing can happen tonight; stop. (This is a `game_conditionals`-style single pass.)
-2. **Exact enumeration:** when tonight-clinch is possible, enumerate outcomes of the *relevant* games only (contenders in that race — in practice ≤ 8 games ⇒ ≤ 256 combos; NHL adds the loser-point dimension where the rule set needs it), evaluate each with the deterministic engine, build the truth table.
-3. **Sentence generation:** minimize the truth table's true-set into minimal AND/OR terms (trivial Quine–McCluskey at ≤ 8 variables) → human sentences, ordered simplest-first. Multiple paths render as "or": "win AND (SEA loss OR HOU loss)."
+Record-only pruning is forbidden when transitive dependencies can change a tiebreak. If a dependency type lacks sound solver support, return `unknown/unsupported_dependency`.
 
-Surfaces: a clinch ticker on league hubs and the tonight page during clinch season ("3 teams can clinch tonight"), team status panels, notification triggers (features/15), and picker deep-links with the clinching combination pre-pinned (features/12 §6).
+## 4. Solver architecture and research gate
 
-## 5. Scope & horizon (PROPOSED, resolving the outline's opens)
+Phase 0 researches representative MLB/NFL cases and specifies the dependency IR plus validation corpus. Phase 5E implements one or more proven methods by supported league/target, such as exact dynamic programming, SAT/SMT, MILP, exhaustive branch-and-bound with sound bounds, or a verified hybrid.
 
-| Item | Proposal | Rationale |
-|---|---|---|
-| Enumeration horizon | **Tonight/this-slate only** (#21); multi-day "clinch scenarios this week" stays probabilistic (sim fractions: "62% chance the division is decided by Sunday") | Exactness×combinatorics is only cheap for one slate; the weekly question is better answered probabilistically anyway |
-| Official-parity edge cases | Automated parity check vs league announcements (§1); forfeits/suspended per era rule files | The badges are a correctness showcase — treat divergence as P1 |
-| Clinch-date distribution method | Simple-arithmetic magic date per sim world (§2), labeled approximate; real-world flags always exact | Honest, cheap, and within a day of truth |
+For each method document:
 
-Launch: flags + badges + magic numbers ship with the doc-10 surfaces (they're `team_odds` columns — Phase 2/3); tonight-scenario sentences and control-your-destiny chips target Phase 5 with the other daily hooks, early-shippable like features/13 if Phase 4 has slack.
+- variables/domains, including NFL ties and NHL multi-valued outcomes;
+- complete mapping from game worlds to evaluator inputs;
+- sound pruning/bounds and proof of search completeness for declared dependencies;
+- treatment of scores/statistics with finite domains or symbolic constraints;
+- emitted proof/counterexample certificate and independent verification;
+- deterministic ordering, cancellation/resource limits and `unknown` behavior; and
+- version/capability matrix by league/era/target.
+
+“Searched 2^20 leaves” or “timed out after X” is not exact. A finite exhaustive search is proof only when the legal world space and pruning completeness are established and the run completes.
+
+## 5. Screening and conservative execution
+
+Monte Carlo counterexamples and cheap arithmetic bounds can quickly disprove candidates or prioritize solver work. They may not prove a universal claim unless the bound itself has a documented proof covering the full dependency graph.
+
+Execution policy:
+
+1. Validate exact snapshot/rules/schedule/PostseasonState and dependency support.
+2. Use screening to find counterexamples/candidates.
+3. Build the complete relevant dependency problem with no unsound record-only exclusions.
+4. Run the supported exact solver under bounded operational resources.
+5. Independently verify its witness/certificate/result where feasible.
+6. Persist `proof_results` with method/version, inputs/checksums, status, dependencies, timing/resources and proof/counterexample artifact.
+
+Timeout, cancellation, missing score domain or unsupported primitive returns `unknown`, keeps the probabilistic display and emits an operational diagnostic—not a user-facing false badge.
+
+## 6. Magic and tragic semantics
+
+Many races have no single rival-independent scalar. The canonical output is therefore a set of minimal sufficient conditions or a per-opponent/scenario vector, for example `{team wins ≥ a, rival R losses ≥ b, rival S regulation losses ≥ c}` under named assumptions.
+
+A scalar “magic number N” may be displayed only if the solver proves that the league/target admits the declared scalar definition and every combination totaling N is sufficient. Otherwise show:
+
+- opponent-specific magic requirements;
+- a small set of minimal guarantee scenarios;
+- “depends on tiebreak/results” with a link to proof/scenario details; or
+- `unknown/not supported`.
+
+Do not compute magic from pessimistic tiebreak assumptions and call it exact unless those assumptions are encoded as the explicit product definition and communicated. Clinch-date distributions remain probabilistic scenario outputs, not proof dates.
+
+## 7. Tonight scenarios
+
+Current-slate enumeration can be a front-end to the same proof solver:
+
+- variables use all legal game outcome classes (NFL tie, NHL regulation/extra-time as required);
+- for each candidate current-slate assignment, the solver proves the target over all later outcomes;
+- only proven assignments enter Boolean/minimal-condition simplification;
+- minimized sentences retain outcome semantics and proof IDs; and
+- resource/unsupported cases remain unknown and are omitted with a disclosure, not assumed false.
+
+Picker links encode the proven current-slate conditions, but the picker remains a probabilistic explorer. A notification is sent only after the proof result is current and stale-event checks pass.
+
+## 8. Control-your-destiny
+
+“Win out ⇒ in” pins the subject team's declared remaining outcomes, then universally quantifies every other legal result/statistic dependency. For NFL/NHL, “win” semantics are explicit (tie not win; NHL regulation versus extra-time when the target cares). The solver returns proof or a counterexample/unknown.
+
+“Needs help” is safe only when win-out control is disproven with a counterexample. Unknown is phrased “not yet proven” and may link to rooting estimates without implying the needed help is exhaustive.
+
+## 9. Verification corpus
+
+- Curated official historical clinch/elimination announcements with exact cutoff schedule/results and era rule artifacts.
+- Synthetic deep tiebreak/dependency fixtures, including NFL SOV/SOS third-party games and score steps.
+- NHL multi-valued and loser-point scenarios; NBA play-in; MLB multi-team/backward-walk as supported.
+- Bounded small leagues/problems exhaustively brute-forced independently and compared to the production solver.
+- Metamorphic tests: adding a guaranteed favorable result cannot invalidate a proof unless the declared rule dependency explains it; proof certificate re-verification; deterministic replay.
+- Negative/timeout/unsupported fixtures proving no false positive leaks through API/UI/notifications.
+
+Official announcement disagreement is investigated as a P1 data/rule/proof issue, but an announcement is not by itself a machine-verifiable proof corpus without exact cutoff inputs.
+
+## 10. Surfaces and language
+
+Core tables/team pages distinguish:
+
+- `Officially clinched` (authoritative official source);
+- `Clinched — proven by PlayoffOdds` (Phase 5E proof ID/method link);
+- probabilistic `>99.9%` (no proof); and
+- `Not yet proven/unknown` when proof cannot complete.
+
+API/MCP returns probability and proof object separately. Proof URLs are immutable and checksum-linked. Accessibility text spells out badge meaning; color/glyph alone is insufficient.
+
+## 11. Phase 5E acceptance and rollback
+
+- Declared league/era/target capability matrix is public; unsupported is explicit.
+- Solver agrees with independent exhaustive results on every bounded fixture and has zero false positives across curated official/edge cases.
+- Dependency coverage fails closed for unknown rule primitives; NFL SOV/SOS and NHL multi-valued fixtures demonstrate no record-only/binary shortcut.
+- Timeout/cancel/resource-limit returns `unknown` across DB/DTO/UI/notification tests.
+- Magic output uses scalar only after definition proof; vector/scenario alternatives are usable and accessible.
+- Production time/memory/admission limits and certificate retention/replay pass.
+
+Rollback disables PlayoffOdds proof badges/numbers by solver version/league while preserving official status and probabilities. Previously wrong proof output is retracted through an immutable correction event; it is never silently edited.

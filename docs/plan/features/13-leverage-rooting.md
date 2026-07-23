@@ -1,56 +1,77 @@
-# Features 13 — Leverage & Rooting Guide
+# Features 13 — Leverage, Tonight, and Rooting Guides
 
-**Status: DRAFT v1 (2026-07-16) — detail pass complete, pending owner review.** Covers reference-doc features #15, #17, #18, and the deferred-but-designed #11. All computation is **partitioning the stored outcome matrix** (doc 02 §4.2/§5) — one sim batch answers every conditional question; nothing here simulates.
+**Status: DRAFT v2 (2026-07-22).** Phase 5B; all branch values are conditional Monte Carlo estimates with diagnostics.
 
----
+## 1. Definitions
 
-## 1. Definitions (fixed here, used everywhere)
+For affected team `T`, game `G` and modeled outcome classes `c`:
 
-For team T and game G with home-win probability p:
+- `P_T(c)` is the estimated target probability conditional on outcome class `c`.
+- For a binary decisive game, signed swing is `P_T(home win) - P_T(away win)`.
+- For multi-valued NFL/NHL games, the stored vector retains tie/regulation/extra-time classes. A simplified “root for team” comparison may pool classes only with a declared weighting/semantic; regulation-loss implications remain separately expressible.
+- A ranking leverage metric combines dispersion across conditional values with the modeled outcome probabilities. Its exact versioned formula is internal/ranking-only and handles all outcome classes; it is not forced into a binary `2p(1-p)` framing for NHL.
+- League-wide game leverage aggregates team-level ranking values using a declared target set and normalization so cross-date/league comparisons are not implied accidentally.
 
-- **Swing:** `swing(T,G) = P(T makes playoffs | home wins) − P(T | home loses)` — signed; the sign encodes who T should root for. Displayed to users (it's concrete: "±6.2%").
-- **Leverage index:** `lev(T,G) = |swing| × 2p(1−p)` — uncertainty-weighted; maximized at coin flips. **Used for ranking only, never displayed** (per the outline lean, now confirmed): a 20%-swing game that's 95/5 is a formality; a 6%-swing coin flip is tonight's drama. Ranking by leverage, showing swing, serves both truths.
-- **Game leverage (league-wide, #18):** `LEV(G) = Σ_T lev(T,G)` over all teams — how much tonight's game matters *to the league*. The leaderboard metric.
-- Division-title swings (`p_division` conditionals) computed alongside playoff swings where either club shares a division with T (doc 02 §4.2).
+Display the concrete conditional pair/vector and uncertainty, not the opaque index. Swings are not additive. “Everything goes right” is a joint picker/direct-conditioned scenario.
 
-Hygiene rules (enforced at write time, doc 02): both partitions ≥ 2k sims, |swing| < 0.1% dropped; displayed swings round to 0.1%. **Swings are not additive across games** — the UI never sums them; "everything goes right tonight" is a scenario question and deep-links to the picker (features/12 §6) which answers it exactly.
+## 2. Estimation and quality gates
 
-## 2. Surfaces
+`game_conditionals` is derived from the same published matrix/worlds and stores branch sample count/ESS, standard error/interval, method/build and suppression reason. It is not “zero extra uncertainty” and never labeled exact.
 
-### 2.1 `/{league}/tonight` — the daily page (#18)
-Every game on today's slate, ranked by `LEV(G)`, each card showing: matchup + start time + anchored win prob; "matters most to" — the top 3–5 teams by |swing| with signed chips ("MIN +6.2 if PHI loses"); and a leverage tier glyph (🔥 tiers by league-relative percentile, not absolute thresholds — leverage inflates late-season, and tiers should stay meaningful in September). Header line doubles as the daily editorial hook ("Tonight's biggest game for the playoff race: CLE @ SEA"). Cross-league merged version on the home dashboard.
+- Publish a branch only when all displayed outcome classes meet the Phase 5B sample/ESS and uncertainty gates.
+- Rare multi-valued branches can use stratified/direct conditioned computation if product value justifies it; otherwise show unavailable rather than a noisy number.
+- Rows below an effect-size display floor may be omitted, but diagnostics remain and the floor is above measured sampling noise.
+- Joint paths and scenario cards use features/12 direct conditioned simulation when matrix ESS is inadequate.
 
-### 2.2 Team-page schedule badges
-Each remaining game within the 7-day conditional horizon (doc 02 §4.2) gets a leverage tier badge + swing tooltip on the team page's schedule list (doc 10 §5). Beyond the horizon, no badge (don't fake precision about three-weeks-out conditionals).
+## 3. Local data sources
 
-### 2.3 `/{league}/{team}/rooting` — the rooting guide (#15)
-"You're a Twins fan. Tonight:" — the team's own game first (its swing is just P(playoffs | win) − P(playoffs | loss)), then every *other* game tonight ranked by |swing|, each with a big root-for arrow and the conditional pair spelled out ("Root **Guardians**: 61.3% if they win, 55.1% if they lose"). Footer: "best case tonight → see it in the picker" (pins every favorable outcome, exact math via the scenario endpoint). Extremely shareable in September pennant races — OG card shows the top 3 rooting targets.
+- Current slate/status/start/neutral/finality: local `games` and `game_change_events`.
+- Snapshot identity and current semantics: `publication_pointers`/`snapshots`.
+- Branch estimates: `game_conditionals` linked to immutable matrix/build.
+- Team context: `team_odds` and `snapshot_team_standings`.
+- Annotations/corrections: `snapshot_events`.
 
-### 2.4 Intraday behavior
-Intraday snapshots (D16) rewrite `game_conditionals` for the remaining slate (doc 02 §9 note, resolved yes) — as early games final, the tonight page re-ranks the late games. This is the page fans keep open on a Sunday.
+No page or notification candidate calls SportsCrunch or simulates in the request path.
 
-## 3. Editorial framing rules
+## 4. Surfaces
 
-Language stays concrete and causal-honest: "swings your odds ±6.2%" (what the number is), "root for X" (direction), never "X eliminates you" for probabilistic statements — elimination language is reserved for the deterministic flags (features/14). Small-swing games get neutral framing ("low stakes for you tonight") rather than manufactured drama.
+### `/{league}/tonight`
 
-## 4. Live in-game approximation (#11 — designed now, shipped later)
+Use the league-local current slate with actual start times and status. Rank eligible games by the versioned leverage metric. Cards show matchup, start/status, anchor probability/source warning, the top affected teams, conditional outcome values and an estimate/uncertainty disclosure. Intraday pointer advance recomputes the remaining slate from new stored rows.
 
-The conditional pair *is* the precomputation: during a live game, a team's live playoff odds are the interpolation
-`p_live(T) = wp_live × P(T | home wins) + (1 − wp_live) × P(T | home loses)`
-where `wp_live` is a live in-game win probability. The branch values are already in `game_conditionals`; the only missing input is `wp_live`. SportsCrunch already *stores* in-game odds (`live_game_lines`, 5-min crawl) but doesn't expose them via API — a small future upstream ask, **deliberately not added to Phase 0** (doc 03 stays lean). When it ships: the tonight page's cards tick in near-real-time during games for the cost of one multiply — no re-simulation, exactly the reference doc's suggested approximation. Multi-game concurrent interpolation is naive (independence assumption) — acceptable for a live ticker, labeled "live estimate," with the next intraday snapshot as the exact correction.
+### Team rooting page
 
-## 5. Data & API
+Show the team's own game first, then other current-slate games by estimated impact. Text says, for example, “Estimated playoff chance: 61.3% if A wins vs 55.1% if B wins,” with interval/details. NHL can state “needs a regulation loss” only when the class-level result supports it.
 
-Everything reads `game_conditionals` (+ `team_odds` for context): `GET /api/site/{league}/tonight`, `GET /api/site/{league}/teams/{id}/rooting?date=`. Both cache per snapshot id. The public API mirrors them later (features/16) — the leverage feed is exactly the kind of thing writers cite.
+The “best case tonight” link canonicalizes favorable outcome classes and sends one joint scenario to the picker; it never sums individual swings.
 
-## 6. PROPOSED resolutions
+### Team schedule badges
 
-| Item | Proposal | Rationale |
-|---|---|---|
-| (outline) leverage definition surfaced | **Show swing, rank by leverage index** (§1); tier glyphs are league-relative percentiles | Users get a concrete number; ranking still prioritizes genuine drama |
-| (outline) multi-team rooting | **Defer.** v1 rooting is per-team-page context; "my teams" preferences arrive with notifications (features/15, tied to Q13 accounts) | No prefs storage exists yet; the per-team page covers the core use |
-| #11 live approximation | Interpolation design locked (§4); shipping gated on a future SportsCrunch live-odds endpoint, not requested in Phase 0 | Branch data is already stored; keep the upstream ask list minimal until this is prioritized |
+Only games inside the published conditional horizon with quality-passing rows receive a badge. Missing/low-ESS rows show no fake tier. Badge/tooltip content is keyboard/touch accessible and has a textual alternative.
 
-## 7. Launch scope (PROPOSED)
+## 5. Language and proof separation
 
-`game_conditionals` exists from Phase 2, so: **tonight page + team-page badges are early-ship candidates at NFL launch (Phase 4)** — they're reads of existing data and give launch a daily hook. Rooting guide pages + picker deep-links land with the picker (Phase 5). Live approximation whenever the upstream feed materializes.
+Use “estimated swing,” “root for,” and conditional values. Do not say a result clinches/eliminates unless Phase 5E returns `proven` evidence or the official standings source declares the status. A 100% branch estimate remains probabilistic.
+
+Correction events can reverse a previously sent impact story. Current pages display the corrected snapshot/event; notification policy handles retraction separately.
+
+## 6. Live in-game approximation (deferred)
+
+With a future contract-tested local live win-probability feed, binary pregame branches can be interpolated for one active game and labeled **live estimate**. Multi-game overlap, ties and NHL class probabilities require a declared approximation; independence interpolation is not presented as exact.
+
+This remains deferred until the feed is locally materialized with timestamps/quality and evaluated. It is not a Phase 0 SportsCrunch requirement and never causes live upstream calls from rendering.
+
+## 7. API and caching
+
+Feature endpoints return stable DTOs over current snapshot/game/branch estimates, with decimal units, class semantics, branch counts/ESS/uncertainty, exact `as_of`, correction warning and canonical URL. Current responses revalidate by pointer version; immutable snapshot variants cache by checksum. Broader public API/MCP exposure may land in Phase 6, but site DTOs are public-shaped from first implementation.
+
+## 8. Phase 5B acceptance and failure
+
+- Binary and multi-valued fixture calculations match the declared metric and never drop NHL loser-point/tie semantics silently.
+- Every displayed branch passes sample/ESS/uncertainty gates and exposes diagnostics; suppressed rows remain absent/unknown.
+- Current/intraday/final/corrected slate transitions use local materialization and do not show stale games as upcoming.
+- Joint scenarios use conditioned computation; UI/tests prohibit swing summation.
+- Keyboard/touch/no-color/reduced-motion and mobile layouts pass doc 06 gates.
+- Load/overload does not compete with publication capacity.
+
+On missing matrices, low ESS, stale pointer or failed recomputation, suppress the affected estimate/page module and keep core odds available with an honest unavailable state.

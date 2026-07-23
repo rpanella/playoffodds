@@ -1,147 +1,134 @@
 # 00 — PlayoffOdds Master Plan
 
-**Status: APPROVED v1 (2026-07-16) — all plan docs reviewed and approved; sole remaining open question is Q19 (Vue vs React, deferred to Phase 3 by design)**
+**Status: DRAFT v2 (2026-07-22) — internally consolidated for owner review.** Individual documents retain their own status; this overview does not imply blanket approval.
 
-This is the top-level plan for PlayoffOdds: a cross-sport playoff probability platform built on top of SportsCrunch. It captures everything decided and discussed to date, and it is the entry point to a set of deeper documents that will be developed and reviewed one at a time — docs first, code later. The full plan is written so that an LLM agent can eventually execute each section with minimal additional context.
+PlayoffOdds is a cross-sport playoff probability product for NFL, MLB, NBA, and NHL. It combines reproducible Monte Carlo forecasts, locally evaluated official era rules, historical lineage, interactive scenarios, and agent-readable public surfaces. The goal is not merely to display a percentage; it is to make every published number traceable to an immutable cutoff, rule artifact, model build, and input bundle.
 
-**How to use these docs:** start here, then follow the doc map (§9). Every locked decision lives in [99-decisions-open-questions.md](99-decisions-open-questions.md) with rationale; if a deeper doc contradicts a decision there, the decision log wins until explicitly changed.
+Use [99-decisions-open-questions.md](99-decisions-open-questions.md) for authoritative decisions/status language and the one canonical open-decision list. A downstream contradiction is resolved through a new superseding decision, not by silently rewriting history.
 
----
+## 1. Product vision and honest differentiators
 
-## 1. Product vision
+- Core odds: qualification/playoffs, division/path, seed, record/points distribution, round advancement and championship.
+- The wedge: pick future results and receive a fast conditional forecast, with stable share links and direct conditioned simulation when a precomputed sample is too thin.
+- Rules credibility: official, immutable era definitions authored once in SportsCrunch and evaluated locally by parity-tested PHP/TypeScript generic interpreters.
+- Historical utility: captured walk-forward points where available and clearly labeled retrospective reconstruction elsewhere, always with exact rules/model/input lineage.
+- Daily hooks: game leverage, rooting guides, correction-aware movement and, later, safe clinch proof and push notifications.
+- Agent/search differentiation: useful server-rendered/no-JS pages, a small anonymous stable read API and MCP search/fetch surface by launch, then a larger developer platform later.
+- Mobile/accessibility: WCAG 2.2 AA, keyboard/touch/responsive data views and resilient HTML are architecture requirements, not launch polish.
 
-A website — **PlayoffOdds, at playoffodds.com** (D24) — that computes and presents playoff odds for the four major North American sports — NFL, MLB, NBA, NHL — filling the hole left by FiveThirtyEight's death:
+Claims remain measurable. Monte Carlo 100% is not proof, reconstruction is not captured history, compression/runtime figures are benchmark targets, and unsupported league procedures yield degraded/unknown—not invented answers.
 
-- **Probabilistic core:** make-playoffs %, division/seed odds, round-by-round advancement, championship odds, full win distributions — from Monte Carlo simulation with correct tiebreakers.
-- **The wedge:** an interactive what-if picker **fused with live simulation** — pick winners and watch probabilities (not just brackets) recalculate. Incumbents are either probabilistic (FanGraphs, MoneyPuck) or interactive (ESPN Playoff Machine) — almost nobody is both.
-- **The moats:** (a) verified-correct, era-versioned tiebreakers sourced from official league publications, where most competitors quietly guess; (b) odds-over-time history that — uniquely — we can *backfill* years into the past (§4); (c) mobile-first design in a desktop-first field; (d) cross-sport breadth with single-sport depth; (e) **agent-native from day one** — server-rendered answer-first pages, a no-auth API, and an MCP server, aimed at making playoffodds.com the source LLM agents cite for playoff odds ([05-agent-and-search-discovery.md](05-agent-and-search-discovery.md)); incumbents are client-rendered and API-less.
-- **The daily hooks:** game leverage ("tonight's game swings your odds ±9%"), rooting guides, clinch/elimination scenarios, and eventually push notifications on odds movement — retention mechanics no incumbent has.
+The competitive feature catalog remains [playoff-projections-feature-and-technical-reference.md](../../playoff-projections-feature-and-technical-reference.md); this plan supersedes its generic implementation suggestions where PlayoffOdds-specific decisions differ.
 
-The competitive survey and feature-by-feature market analysis lives in [`playoff-projections-feature-and-technical-reference.md`](../../playoff-projections-feature-and-technical-reference.md) (repo root). Feature numbers cited below (#1–#31) refer to that document.
+## 2. Architecture and system boundary
 
-## 2. Starting assets
-
-### 2.1 SportsCrunch (`C:\Users\rpane\projects\sportscrunch`)
-
-The owner's existing Laravel 12 app. It already implements stages 1–2 of the universal pipeline (`team strength → per-game win probability`), which means PlayoffOdds builds **only the simulation and product layers**. What SportsCrunch provides:
-
-| Capability | Detail |
-|---|---|
-| Schedules & results | ESPN API; future schedules 2×/day, live scores every 5 min while games are active. Suspended/postponed/makeup handling. |
-| Sportsbook lines | TheOddsApi, ~10 books, every 5 min, NFL/NBA/MLB/NHL. Store-on-change history (`game_lines` + `game_line_histories`); live coverage from ~2020, legacy import (Pinnacle et al. 2014–2024, ~1M snapshots) built. |
-| Power ratings | Market-implied: iterative regression fitting team ratings to de-vigged consensus win probabilities, with recency decay, preseason anchor blend, MLB pitcher sub-model, NCAAF conference priors. Computed in memory (`app/Predictors/`), **not persisted, not exposed via API** — an export endpoint is one of our asks. |
-| Per-game win probability | Every remaining game carries `market_home_win_probability` on `games`: real market consensus where lines exist, model projection otherwise (refreshed hourly). `market_line_types` bitmask flags real vs projected. |
-| Rating→probability model | Logistic: `wp = 1/(1 + e^(−k·(r_home − r_away + hfa)))`, per-league tuned `k` (NFL 2.4, NBA 2.5, NHL/MLB 2.0), HFA additive in logit space. This structure is load-bearing for our sim design (§5). |
-| Point-in-time odds | `GET /api/v1/seasons/{season}/historical-odds?at=<ISO8601>` — time-travels every unplayed regular-season game's odds to any past instant, real or projected, with `is_projected` flag. Rate-limited 30/min. |
-| API plumbing | Sanctum-authed `/api/v1`: seasons, teams (with conference/division alignment), games, historical-odds, webhooks (push on game/score/line changes). OpenAPI documented. Existing consumer: poolcrunch. |
-| Backtest machinery | Walk-forward `PredictorTester` + `PeriodTimeTraveler` — reusable pattern for calibrating and validating our sim. |
-
-**Scope boundary (D9):** SportsCrunch's own data acquisition and completeness — legacy-season line backfill, gap recovery, source redundancy, flat-file hardening — are SportsCrunch's roadmap, not this project's. The owner will backfill older seasons there independently. This project's SportsCrunch-side scope is limited to the **new additions PlayoffOdds needs** ([03-sportscrunch-integration.md](03-sportscrunch-integration.md)): ratings/params endpoint, projected-vs-real flag on the games endpoint, postseason coverage decision, and a bulk-read path for backfill. The sim pipeline must still *consume defensively* — missing or gappy upstream history should degrade gracefully (shallower backfill), never silently corrupt odds.
-
-### 2.2 OLD_playoffodds (`C:\Users\rpane\projects\OLD_playoffodds`)
-
-The owner's hand-built playoff-odds app from ~10 years ago. **Decision D15: not used — not as code, not as a reference.** League tiebreaker procedures have changed at every step since it was written (spot-checks confirmed divergences from current official rules). All tiebreaker rules are sourced fresh from the leagues' official publications and stored **era-versioned** — paired human-readable + machine-encoded rule sets with applicability year ranges ([04-standings-tiebreakers.md](04-standings-tiebreakers.md) §2). Naming note: the *legacy* "playoffodds" MySQL DB is a historical-lines source being imported INTO SportsCrunch — distinct from this new product.
-
-## 3. Locked decisions (summary)
-
-Full log with rationale: [99-decisions-open-questions.md](99-decisions-open-questions.md).
-
-| # | Decision |
-|---|---|
-| D1 | Docs-first: detailed, reviewable plan docs before any code. |
-| D2 | Sport order: engine built sport-agnostic; **MLB is the live development/validation sport** (season in progress now); **public launch targets NFL kickoff** (~Sept 10, 2026); NBA/NHL follow in October. |
-| D3 | Website: **Laravel 12 + Inertia**. Frontend framework Vue or React — final call deferred to Phase 3 (owner has light Vue experience and none in React, but is open to React since LLM agents write all the code). |
-| D4 | Simulation engine: **TypeScript, shared** — one engine runs as a Node worker (server batches) and in the browser (interactive picker). Standings/tiebreaker logic written once. |
-| D5 | Data access: **SportsCrunch API + small additions** (ratings/params endpoint, projected flag, postseason coverage) rather than direct DB reads. |
-| D6 | Simulation uses **dynamic in-sim rating evolution** (zero-mean Elo-style updates), not frozen per-game odds. |
-| D7 | Per-game probabilities are **anchored to SportsCrunch's blended market/model probability** in logit space; the sim applies rating deltas on top (§5). |
-
-## 4. The backfill advantage
-
-The reference doc's loudest warning — "you cannot backfill odds-over-time charts; start snapshotting before you build UI" — **largely does not apply to us.** Because SportsCrunch can reconstruct every game's win probability as of any past instant (`historical-odds?at=`), we can re-run the full season simulation *as of* past dates and generate historical playoff-odds time series: back to ~2020 from live-crawled lines, and deeper as SportsCrunch's own historical backfill progresses (older seasons are SportsCrunch's roadmap; our backfill depth simply follows whatever upstream coverage exists). Launch-day charts with multi-year history is a feature nobody else can cheaply copy.
-
-We still persist forward-looking daily snapshots from the first week of engine operation (recomputation is expensive and throttled), but backfill converts the doc's hardest constraint into a differentiator. Details: [02-simulation-outputs.md](02-simulation-outputs.md).
-
-## 5. Simulation methodology (summary)
-
-Full detail: [01-simulation-engine.md](01-simulation-engine.md).
-
-**Anchored probabilities.** For each remaining game, SportsCrunch supplies a baseline probability (real de-vigged market consensus where a line exists — which prices in injuries, rest, starting pitchers; model projection otherwise). We precompute `base_logit[g] = logit(wp_base[g])` once per snapshot.
-
-**Dynamic rating evolution.** Each simulated season world maintains per-team rating deltas (starting at 0). Games are simulated in chronological order:
-
-```
-wp      = sigmoid(base_logit[g] + k·(Δ_home − Δ_away))   // k = league's tuned sigmoid constant
-outcome = bernoulli(wp)
-Δ_home += η·(outcome − wp);  Δ_away −= η·(outcome − wp)  // zero-mean, martingale
+```text
+SportsCrunch existing APIs + required Phase 0 rules/standings APIs
+        │ exact cutoff inputs, immutable rule, authoritative PHP standings
+        ▼
+PlayoffOdds assembler → schema/checksum validation → TS baseline rebuild/parity
+        │                                      failure: quarantine, keep last good
+        ▼
+permanent canonical SnapshotBundle → local TS simulation/aggregation
+        ▼
+immutable DB/artifacts → atomic publication pointer
+        ▼
+SSR/no-JS site · anonymous API · MCP · browser worker payload · notifications
 ```
 
-A weak team that starts 4–0 *in a given sim world* gets stronger in that world — producing the fat tails, within-team game correlation, and realistic longshot/collapse scenarios that frozen-odds sims miss, without biasing mean odds (updates are zero-mean by construction). Optional second mechanism (per-sim initial talent draw `ε ~ N(0, σ_est)`) added only if calibration demands it. Precedent: FTN adjusts DAVE ±1.5% per simulated game; FiveThirtyEight ran Elo forward through simulated games.
+Normal requests and browser workers never call SportsCrunch. They read local materialization and immutable published artifacts. All candidate data is invisible until the pointer advances atomically; any validation/parity/persistence failure leaves current on the last good snapshot.
 
-**Calibration by measurement, not guesswork.** η (per league) is set by measuring how much SportsCrunch's *actual market-implied ratings* drifted over N-week horizons across past seasons (the time-travel machinery reconstructs ratings as-of any past week). Validation: run the engine from historical mid-season dates and check coverage — actual final win totals should land in the simulated 10th–90th percentile band ~80% of the time.
+### SportsCrunch confirmed boundary (D30)
 
-**Determinism & jitter.** Fixed RNG seed per snapshot; 100k sims target (10k floor). Odds must not visibly bounce when no games were played.
+SportsCrunch is the system of record for immutable, era-versioned standings/qualification/seeding rules and authoritative arbitrary-`as_of` standings. It owns canonical cited docs, JSON Schema, fixtures, selection/exceptions, PHP interpreter, and conceptual versioned endpoints for standings and rule artifacts. It already has versioned teams/games/historical-odds/webhook strengths, but the rule registry and standings endpoints are **required Phase 0 work, not existing functionality**.
 
-**Playoffs.** Bracket simulation continues within each sim world; playoff matchup probabilities come from exported ratings + the same deltas accumulated during that world's regular season (a team that got hot in-sim carries it into the bracket). Requires the SportsCrunch ratings/params endpoint ([03-sportscrunch-integration.md](03-sportscrunch-integration.md)).
+PlayoffOdds pins the exact artifact into every bundle, rebuilds the baseline with a generic TypeScript evaluator, and blocks publication on material PHP/TypeScript disagreement. It owns simulation, local accumulators, postseason/bracket modeling, proof-search algorithms, draft/lottery initially, materialization/cache and permanent exact bundle retention. See [03-sportscrunch-integration.md](03-sportscrunch-integration.md) and [04-standings-tiebreakers.md](04-standings-tiebreakers.md).
 
-**Per-sport gotchas** (detail in 01 and 04):
+## 3. Immutable snapshot product contract
 
-| Sport | Issue | Approach sketch |
+A snapshot is an immutable league-season output at exact `as_of`, not merely a database row or random seed. Its permanently retained compressed canonical `SnapshotBundle` contains every normalized input, `PostseasonState`, exact rule payload, authoritative comparison response, model/parameter/build IDs and checksums, seed/count, binary format, runtime replay metadata, source artifacts/lineage and coverage/correction warnings.
+
+Daily **spine** snapshots form the chart axis. **Intraday** snapshots can be current and power tonight/alerts but do not introduce irregular default chart points. `official` and `if_season_ended` standings are explicit distinct modes. All terminology and the complete local ERD—teams, seasons, alignments, games, snapshot games/standings, events/corrections, odds, artifacts and publication pointers—live in [02-simulation-outputs.md](02-simulation-outputs.md).
+
+Postseason snapshots resume from known matchups, completed games/series, current scores, advanced/eliminated teams and remaining bracket state. Published snapshots never change when SportsCrunch later corrects a source or rule; corrections create linked revisions.
+
+## 4. Simulation and mathematical boundaries
+
+The TypeScript engine is pure and shared by Node and browser workers. Anchored probabilities plus calibrated dynamic rating evolution remain the model direction, but centered latent increments do not guarantee unchanged mean probabilities through a sigmoid. Phase 0/1 measures induced drift and requires held-out Brier/log loss, calibration and interval-coverage evidence against a frozen baseline.
+
+Games use actual start/overlap information batches, not dates. NFL uses a declared probability-preserving W/L/T construction and discrete joint scores; NHL uses a constrained six-terminal-class hierarchy (home/away winner × REG/OT/SO) that preserves outright win probability; all rounding/accumulator updates are versioned and fixture-tested. Performance counts/times are targets until representative server/mobile prototypes pass.
+
+The browser payload includes ratings/state, complete remaining game timing/neutral flags, standings baseline, bracket configuration, `PostseasonState`, exact rule artifact and engine compatibility—not only a schedule. See [01-simulation-engine.md](01-simulation-engine.md).
+
+## 5. Proof, conditioning, draft, and historical limitations
+
+- Matrix filtering estimates conditional probabilities; it is not exact. It is used only with adequate branch count/ESS. Low-sample scenarios run a direct conditioned server simulation with a stable seed derived from snapshot + ordered pins.
+- Clinch/elimination/control/magic guarantees use a later proof-safe deterministic subsystem with explicit rule dependency graphs. Timeouts/unsupported dependencies return `unknown/not_proven`. Exact flags are Phase 5E, not Phase 2.
+- Magic numbers can be per-opponent or scenario-dependent; the product does not force every league race into one scalar.
+- Draft/lottery draws are sampled jointly without replacement in the same simulated season world under validated era eligibility/team-state rules. Known-incomplete MLB restrictions block the module rather than ship behind a footnote.
+- Historical output labels captured walk-forward versus retrospective reconstruction versus frozen-modern-model evaluation. SportsCrunch's historical-odds endpoint can depend on current schedule/model/configuration semantics; coverage, anomalies, versions and late corrections are visible.
+
+## 6. Product surfaces and data sources
+
+| Surface | Local source/contract | Phase |
 |---|---|---|
-| NHL | 3-point games: standings need P(reg win)/P(OT win)/P(OT loss)/P(reg loss); SportsCrunch WP is outright-win only | Layer an OT-frequency model (league OT rate conditional on closeness) splitting outright WP into the four outcomes; track ROW for tiebreakers |
-| MLB | Pitcher effects; 162 games | Anchor already prices pitchers into near-term market lines; far games are team-level until lines arrive — acceptable |
-| NFL | Brutal tiebreaker cascade; net-points steps want margins | Era-versioned ladder encoded from official NFL procedures (doc 04 §2); margin-first outcome model supplies net-points steps (D12) |
-| NBA | Play-in tournament is a separate bracket stage | Simulate play-in explicitly inside each world |
+| League/team/seed/current standings | `publication_pointers`, `snapshot_team_standings`, `team_odds`, local teams/games | 3 |
+| Basic history chart/archive | spine `snapshots` + `team_odds` + `snapshot_events` | 3 |
+| Methodology/model/rules lineage | snapshot diagnostics, retained rule/model/replay artifacts | 3 |
+| Anonymous API + MCP search/fetch | stable DTOs over the same current/snapshot/spine resources | 3/4 launch gate |
+| Picker | complete client payload + matrix with ESS gate + direct conditioned server simulation | 5A |
+| Leverage/rooting/tonight | local games + `game_conditionals` uncertainty + current pointer | 5B |
+| NBA/NHL | same contracts after league-specific rule/data/model gates | 5C/5D |
+| Clinch/elimination/magic | `proof_results` from dependency-aware proof subsystem | 5E |
+| Notifications | local snapshots/events/conditionals + privacy-minimized push subscriptions | 6 |
+| Draft/lottery | joint sim finish worlds + validated PlayoffOdds era rules/team state | 6 |
+| API/MCP/download expansion | versioned DTOs/keys/pagination/bulk over published local outputs | 6 |
 
-## 6. Output data philosophy
+No feature is authorized without an explicit local source and failure/unknown state.
 
-Full detail: [02-simulation-outputs.md](02-simulation-outputs.md).
+## 7. Web framework and operations
 
-The engine's outputs are designed **feature-back**: every feature in Part 1 of the reference doc must be servable from stored outputs without re-simulation. Two layers per snapshot:
+The **PROPOSED** greenfield default is Laravel 13 + Inertia 3 + Vue 3 + TypeScript, subject to current support/package/SSR verification and owner decision O1 in Phase 0. React is an intentional alternative only for a concrete owner-confirmed reason; it is not a silent implementation-agent preference.
 
-1. **Aggregates (MySQL, per team per snapshot):** make-playoffs %, division %, wild-card path %, seed distribution (P(seed=1..n)), round-by-round advancement, championship %, bye/best-record odds, win-total distribution percentiles, projected record, SOS-remaining, draft-order odds. Keyed `(league, season, snapshot_instant, team)`.
-2. **Per-sim outcome matrix (compact artifact per snapshot):** every sim's remaining-game outcome vector + resulting per-team seeds/finishes. This single artifact powers the conditional features with zero extra simulation: leverage (partition sims by tonight's game outcome → P(playoffs | win) vs P(playoffs | loss)), rooting guide (partition by *other* teams' games), what-if picker server-precision results (filter sims matching user picks), and the compact client payload for browser sims.
+Useful odds/tables/navigation must render without JavaScript. If Inertia SSR provides that, its Node process is a first-class supervised deployment unit with coupled build manifests, health/readiness, restarts/backoff, logs/metrics, graceful rollback and no-JS integration tests. Node simulation workers are separately supervised and isolated from request latency. Full requirements are in [06-cross-cutting-requirements.md](06-cross-cutting-requirements.md).
 
-## 7. Feature areas → docs
+## 8. Cross-cutting release contract
 
-| Doc | Covers (ref-doc feature #s) | Depends on |
+Every phase applies security/abuse limits, privacy/deletion/retention, WCAG 2.2 AA, legal/licensing/marks, analytics/metrics, observability/alerts, backup/restore/DR, process supervision, capacity/cost, data-quality/correction and API/model upgrade policies from doc 06.
+
+Important launch gates include: threat/load/security review; owner-approved crawler discovery-vs-training matrix; exact output license/attribution compatibility; team-mark status; restore/replay and rollback drills; accessible no-JS critical paths; alert/runbooks; and measured headroom/cost. Unresolved numeric/policy choices live only as O1–O7 in doc 99.
+
+## 9. Phase summary
+
+1. **Phase 0:** contracts, SportsCrunch rule registry/as-of standings, PHP/TS parity, canonical bundle/replay/binary/math prototypes, local ERD, framework/version choice, and cross-cutting decisions.
+2. **Phase 1:** narrow MLB end-to-end vertical proof, then NFL; retained bundle → local materialization → simulate/persist/aggregate → parity/replay/minimal inspection with quantitative gates.
+3. **Phase 2:** production data spine, retries/dead-letter, atomic pointer, lineage/corrections, backup/restore, quality/observability and two-week soak. No proof-safe clinch requirement.
+4. **Phase 3:** core SSR/no-JS accessible public experience, one basic chart, methodology/model card and small anonymous API/MCP slice.
+5. **Phase 4:** private beta/soft launch, then public launch only after load/security/legal/accessibility/rollback/observability gates.
+6. **Phases 5A–5E:** picker; leverage/rooting; NBA; NHL; proof-safe clinch/elimination/magic.
+7. **Phase 6:** hardened push, joint draft/lottery and larger API/MCP/download platform.
+
+Detailed dependencies, quantitative exits, rollback behavior and deferrals: [90-build-order.md](90-build-order.md).
+
+## 10. Document map and status
+
+| Document | Purpose | Status |
 |---|---|---|
-| [features/10-core-odds-displays.md](features/10-core-odds-displays.md) | #1–7 core probabilities, #27 power ratings, #28 SOS, #31 viz | Aggregates |
-| [features/11-history-timeseries.md](features/11-history-timeseries.md) | #8 odds-over-season charts, #9 date selector, #10 preseason-vs-now | Snapshots + backfill |
-| [features/12-interactive-picker.md](features/12-interactive-picker.md) | #12–14 picker + live sim fusion + shareable links | Browser TS engine, outcome matrix |
-| [features/13-leverage-rooting.md](features/13-leverage-rooting.md) | #15 rooting guide, #17 leverage, #18 daily swing feed | Outcome matrix partitioning |
-| [features/14-clinch-magic-elimination.md](features/14-clinch-magic-elimination.md) | #19 control-your-destiny, #20 magic numbers (+probability fusion), #21 clinch scenarios | Tiebreaker engine (deterministic mode) |
-| [features/15-notifications-mobile.md](features/15-notifications-mobile.md) | #23 push notifications, #24 mobile-first UX | Snapshots, leverage |
-| [features/16-public-api.md](features/16-public-api.md) | #25 public API / data downloads | Aggregates, snapshots |
-| [features/17-draft-order.md](features/17-draft-order.md) | #29 draft order & lottery | Same sim outputs, bottom of standings |
-
-Deliberately deferred: #11 live in-game odds (approximation path noted in 13), #30 injury/roster awareness (v2; SportsCrunch anchor partially prices it via market lines), #26 cross-sport is the product itself.
-
-## 8. Build order (summary)
-
-Full phasing with exit criteria: [90-build-order.md](90-build-order.md). Compressed view:
-
-- **Phase 0 (now):** SportsCrunch additions — ratings/params endpoint, projected flag, postseason/bulk-read decisions. Finish these plan docs.
-- **Phase 1 (Jul–Aug):** TS engine core against live MLB — schedule/standings/tiebreakers (MLB, NFL), anchored+dynamic sim, calibration harness, historical verification.
-- **Phase 2 (Aug):** Snapshot pipeline + backfill; daily MLB snapshots running unattended.
-- **Phase 3 (Aug–Sep):** Website (Laravel + Inertia/Vue): core odds tables, team pages, seed matrix, time-series charts (backfilled), NFL onboarding.
-- **Phase 4 (Sep):** **NFL launch** at kickoff. NBA/NHL onboarding begins.
-- **Phase 5 (Oct+):** Interactive picker (browser engine), leverage feed + rooting guide, clinch/magic, NBA/NHL live, then notifications, public API, draft order.
-
-## 9. Doc map & status
-
-| Doc | Purpose | Status |
-|---|---|---|
-| 00-overview.md (this) | Master plan, entry point | DRAFT v1 |
-| [01-simulation-engine.md](01-simulation-engine.md) | Sim engine: math, algorithms, per-sport models, calibration | APPROVED v1 (2026-07-16) |
-| [02-simulation-outputs.md](02-simulation-outputs.md) | Output schemas, snapshot store, outcome matrices, backfill | APPROVED v1 (2026-07-16) |
-| [03-sportscrunch-integration.md](03-sportscrunch-integration.md) | Data contracts, SportsCrunch-side additions, pipeline triggers | APPROVED v1 (2026-07-16) |
-| [04-standings-tiebreakers.md](04-standings-tiebreakers.md) | Era-versioned tiebreaker rules architecture + verification | APPROVED v2.1 (2026-07-16; all 4 leagues verified vs official sources) |
-| [05-agent-and-search-discovery.md](05-agent-and-search-discovery.md) | Agent-friendliness + SEO/GEO: crawler posture, MCP server, anonymous API tier | DRAFT v1 — pending review |
-| features/10, 11 | Core odds displays; history & time series (gate Phase 3) | APPROVED v1 (2026-07-16) |
-| features/12, 13 | Interactive picker; leverage & rooting (gate Phase 5) | APPROVED v1 (2026-07-16) |
-| features/14–17 | Clinch/magic; notifications/mobile; public API; draft order | APPROVED v1 (2026-07-16) |
-| [90-build-order.md](90-build-order.md) | Phases, dependencies, exit criteria | DRAFT v1 |
-| [99-decisions-open-questions.md](99-decisions-open-questions.md) | Decision log + open questions | LIVE |
-
-**Process:** each OUTLINE doc gets a detail pass + owner review before any code that depends on it. Decisions made during reviews land in 99 with rationale.
+| 00 (this file) | Master architecture/product contract and map | DRAFT v2 |
+| [01-simulation-engine.md](01-simulation-engine.md) | Pure engine, bundle inputs, math, postseason state, replay, performance gates | DRAFT v2 |
+| [02-simulation-outputs.md](02-simulation-outputs.md) | Canonical vocabulary, local ERD, artifacts, atomic publication, retention/replay | DRAFT v2 |
+| [03-sportscrunch-integration.md](03-sportscrunch-integration.md) | SportsCrunch ownership/endpoints/handshake/failure contract | DRAFT v2; confirmed boundary, upstream work pending |
+| [04-standings-tiebreakers.md](04-standings-tiebreakers.md) | Shared schema/interpreter/procedure/conformance architecture | DRAFT v3 |
+| [05-agent-and-search-discovery.md](05-agent-and-search-discovery.md) | Discovery, crawler policy, API/MCP citation behavior | DRAFT v2 |
+| [06-cross-cutting-requirements.md](06-cross-cutting-requirements.md) | Security, privacy, accessibility, legal, operations, quality and upgrades | DRAFT v1 |
+| [features/10-core-odds-displays.md](features/10-core-odds-displays.md) | Core tables/team/seed/methodology UX | DRAFT v2 |
+| [features/11-history-timeseries.md](features/11-history-timeseries.md) | History, charts, archive and reconstruction labeling | DRAFT v2 |
+| [features/12-interactive-picker.md](features/12-interactive-picker.md) | Hybrid conditioning, stable scenarios, client/server diagnostics | DRAFT v2 |
+| [features/13-leverage-rooting.md](features/13-leverage-rooting.md) | Conditional estimates, tonight and rooting | DRAFT v2 |
+| [features/14-clinch-magic-elimination.md](features/14-clinch-magic-elimination.md) | Proof-safe deterministic status contract | DRAFT v2 |
+| [features/15-notifications-mobile.md](features/15-notifications-mobile.md) | PWA/mobile and hardened push lifecycle | DRAFT v2 |
+| [features/16-public-api.md](features/16-public-api.md) | Stable anonymous API/MCP DTO and expansion | DRAFT v2 |
+| [features/17-draft-order.md](features/17-draft-order.md) | Joint era-valid draft/lottery modeling | DRAFT v2 |
+| [90-build-order.md](90-build-order.md) | Dependency- and evidence-gated implementation phases | DRAFT v2 |
+| [99-decisions-open-questions.md](99-decisions-open-questions.md) | Append-only decisions and canonical O1–O7 | LIVE |
+| [playoff-projections-feature-and-technical-reference.md](../../playoff-projections-feature-and-technical-reference.md) | Competitive/reference catalog; generic advice subordinate to this plan | REFERENCE, amended 2026-07-22 |
