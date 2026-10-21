@@ -1,112 +1,54 @@
-# Features 12 — Interactive Picker and Conditioned Forecasts
+# Features 12 — Interactive Picker
 
-**Status: DRAFT v2 (2026-07-22).** Phase 5A; conditional estimates are never described as exact.
+**Status: DRAFT v3 (2026-10-21).** M4, after clinching scenarios, postseason resume and result-coupled drift. Aim for NFL Weeks 17–18; otherwise it debuts for the NFL playoffs and NBA/NHL. The first version runs entirely in the browser (D49). Results are simulation estimates, never described as exact.
 
-Users pin future outcomes and see a coherent forecast under those conditions. Pins modify one simulated world: they still update standings, dynamic team state and later bracket matchups at the correct information-batch boundary.
+Users pick winners of upcoming games and see the playoff odds recalculate as probabilities, not just a deterministic bracket. This is the product's wedge: almost no one fuses a picker with live simulation.
 
-## 1. Complete immutable client contract
+## 1. How it works
 
-The browser worker receives a snapshot-keyed payload derived from the retained bundle:
+1. The page loads the current snapshot's `SimInput`, the same gzipped file the server simulated ([02](../02-simulation-outputs.md) §3). It is served at a cacheable URL keyed by snapshot ID. The file holds team IDs, games, win probabilities and ratings, and nothing secret.
+2. A Web Worker runs `@playoffodds/engine` with the user's picks as forced outcomes (`pins`, [01](../01-simulation-engine.md) §9).
+3. It shows a first result after about 2k sims, then keeps refining in the background (to 5k or 10k), updating the numbers quietly. The details panel shows the simulation count.
+4. The baseline column shows current odds from the server snapshot, so users see the change each pick makes.
 
-- stable team/game IDs and index maps;
-- complete remaining regular/postseason game start/overlap batch, teams, neutral/site and anchor semantics/source;
-- team ratings/dynamic state and every parameter checksum;
-- locally rebuilt standings baseline;
-- bracket configuration and resumable `PostseasonState`;
-- exact pinned rule payload/schema/checksum; and
-- required engine/build/PRNG/binary compatibility.
+Everything happens inside the same simulated season.
 
-The worker rejects incompatible/corrupt payloads and offers a refresh. It never fetches SportsCrunch or improvises rules from a version string.
+- **Picks affect later games.** With the result-coupled drift built first in M4 ([01](../01-simulation-engine.md) §4), a picked win also nudges that team's later games and playoff matchups, as a real win would move later lines.
+- **Picks don't reshuffle anything else.** Because draws are keyed by sim, purpose and game, a pick changes only what that result touches. Changes against baseline therefore reflect the pick, not reshuffled randomness.
 
-## 2. Three computation paths
+## 2. Picks, seeds and share links
 
-### A. Client preview/refinement
+- **Canonical picks:** a sorted list of `(game_id, outcome)` with outcomes `home` or `away` (NFL `tie` later, if wanted). Game IDs are stable SportsCrunch IDs (D23).
+- **URL:** a versioned, compact base64url encoding in a query parameter, for example `/nfl/picker?p=1.<encoded>`. Validate length and count. If a link fails to decode, say so instead of applying part of it.
+- **Seed:** a hash of snapshot ID plus canonical picks, so everyone opening the same link against the same snapshot sees the same numbers.
+- **Links apply to the current snapshot** (D23). If the snapshot has moved on, the page shows the new `as_of`.
 
-On a valid pin change, a Web Worker runs the direct conditioned engine (pinned outcomes are forced) using streams derived from the canonical scenario seed. The first 2k target streams provide a quick estimate; idle work extends additively to the 5k target. These counts and latency budgets remain benchmark-controlled targets.
+## 3. When games finish
 
-### B. Server matrix conditional estimate
+When the current snapshot advances:
 
-For a small pin set, the server may filter the retained outcome matrix and recompute aggregates over matching worlds. This is **conditional Monte Carlo**, not exact. It returns branch count, ESS, simulation count, uncertainty/interval and matrix/build lineage.
+- picks for games that ended the way the user picked are dropped, with a small note;
+- picks that contradict the actual result are dropped and listed ("Your pick: MIA over BUF — BUF won").
 
-The configurable policy permits this path only when:
+## 4. UI
 
-- every pin is represented by the matrix's multi-valued outcome semantics;
-- pin count/query cost is within abuse limits;
-- joint matching ESS passes the Phase 5A threshold; and
-- uncertainty for displayed primary probabilities is within the product threshold.
+- Games are grouped by week. Each game has a three-state control (home / away / not picked) and shows its win probability.
+- **Quick actions:** "reset", and "pick all favorites" for the week.
+- **Results:** the league table with playoffs, division and seed odds next to the baseline. A team focus view shows that team's path.
+- The picker is keyboard and touch operable. Number updates don't steal focus or flash.
+- A 100% result reads ">99.9%", never "clinched". A later version can run the clinch check on the user's scenario and say "these picks clinch a playoff spot" when proven.
 
-**PROPOSED prototype threshold:** ESS ≥5,000 and worst-case standard error ≤0.75 percentage point. The measured Phase 5A gate may change it without changing DTO semantics.
+## 5. Performance targets
 
-### C. Direct conditioned server simulation
+- First result in under ~200 ms on a mid-range phone.
+- Engine bundle plus snapshot input under ~150 KB compressed.
+- Worker memory stays modest.
 
-If the matrix branch is too thin, unsupported, pruned or fails uncertainty, enqueue/run a direct server simulation with pins forced. Every simulated world satisfies the scenario; no rejection/filter collapse occurs. The run uses a bounded/adaptive count up to the approved server target and returns count/uncertainty/build lineage. Results cache by immutable snapshot ID + canonical pins + engine/rules/parameter checksums.
+Measure in M4. If phones are too slow, start with fewer sims and say so.
 
-The request/render process does not run the engine inline. It creates/looks up a bounded job and returns progress/result; admission control protects publication workers.
+## 6. Later
 
-## 3. Stable seed and canonical pins
-
-Canonical pin encoding includes league, stable game ID, outcome semantic/version (winner/tie/regulation/extra-time where supported), sorted order and encoding version. Unknown, duplicate, contradictory or already-impossible pins are rejected or resolved through §6.
-
-`scenario_seed = stable_hash(snapshot identity + canonical ordered pins + engine seed-domain version)`.
-
-Thus every viewer resolving the same link against the same current snapshot gets the same client/server streams. Because D23 links apply to current by default, a later snapshot intentionally produces a different identity/seed and shows the new `as_of`. Immutable snapshot links may be used for audit/API fetch but are not the default viral scenario behavior.
-
-## 4. Progressive UI state semantics
-
-The state machine is visible enough to prevent numbers silently changing meaning:
-
-| State | Meaning |
-|---|---|
-| `loading_inputs` | Payload/worker compatibility is being checked; last current odds may remain visibly unconditioned. |
-| `preview` | First direct client estimate is available; label “quick estimate” and show simulation count. |
-| `refining` | Preview remains stable while additional disjoint streams run; progress is non-blocking. |
-| `client_refined` | Client target reached; display count/uncertainty in details. |
-| `server_matrix` | Higher-sample conditional-matrix estimate passed ESS/uncertainty gates; never label exact. |
-| `server_conditioned` | Direct conditioned server result is authoritative for this scenario estimate; still Monte Carlo with uncertainty. |
-| `unavailable/stale` | Payload/build/snapshot/job failed or pointer moved materially; preserve pins and offer refresh/retry. |
-
-Primary UI may use a compact “Quick / refining / updated” indicator. A diagnostics disclosure always exposes snapshot, method, simulations, matching count/ESS, standard error/interval, seed domain and build. Swapping results uses restrained motion, preserves focus and does not announce every intermediate number to screen readers.
-
-Toggling a pin off returns to the deterministic seed for the resulting canonical set; the same snapshot/scenario reproduces earlier streams. It does not claim different methods/counts have zero sampling difference.
-
-## 5. Picker UX
-
-- Slate navigation uses actual league dates/weeks and local game start/state.
-- A three-state winner control (home/away/unpicked) is the base. NFL tie and NHL regulation/extra-time classes are offered only when the UI/encoding/model phase explicitly supports them; hidden classes remain simulated.
-- Team panel and league table show playoffs/path/seed/round values with the probability-proof honesty formatter.
-- “What helps” ordering can use feature 13 conditionals, but multiple favorable pins are recomputed as one joint scenario; swings are never summed.
-- Reset/undo and bounded quick actions produce explicit canonical pins.
-- No picker result claims a scenario itself mathematically clinches a team until Phase 5E proof runs and returns evidence. A 100% conditioned estimate formats probabilistically.
-
-## 6. Live/current rollover and corrections
-
-On pointer advance:
-
-- Matching pins for now-final games become known state and are removed from the future pin set with an audit note.
-- Contradicted pins are marked, excluded and summarized; the user explicitly clears/accepts the new scenario.
-- Postponed/canceled/rescheduled/neutral-site corrections use local `game_change_events`; do not silently rebind a game ID to different semantics.
-- The new payload includes the advanced `PostseasonState`. Completed postseason games/series are never re-simulated.
-- A retracted/corrected snapshot invalidates cached scenario results by snapshot/checksum and links to the correction.
-
-## 7. Share links
-
-Keep D23 URL-only, stable-ID, versioned base64url encoding with strict size/count validation. Decode failures show typed recovery instead of applying partial unknown picks silently. The page states current-snapshot semantics and exact `as_of`.
-
-Scenario share cards are rendered from a result that passed its method/uncertainty gate and include canonical URL, snapshot time and “estimate” language. If direct result is pending, do not publish a falsely precise card from a tiny branch.
-
-## 8. Security, accessibility, performance, and failure
-
-- Limit pin count, URL/body size, decompression, simulation count, jobs/IP/key, global concurrency and cache cardinality; validate game ownership and outcome enum.
-- Publication workers have reserved capacity; picker overload receives bounded queue/429 with retry guidance.
-- Worker runs off the UI thread with cancellation and memory/time caps. A failed worker/job leaves static current odds usable.
-- Controls are keyboard/touch operable with labels, selected state, focus preservation, reduced motion and semantic result updates.
-- Initial targets: preview under 200 ms, payload under 100 KB compressed and worker under 50 MB on a representative mid-range mobile device; each is measured and can trigger a documented server-first/deferred-league fallback.
-
-## 9. Phase 5A exit gate
-
-- Same snapshot + canonical pins reproduce stream/result checksums in the supported replay envelope; different viewers resolve the same seed.
-- 2k→5k extends without rerunning first streams; state transitions and accessibility tests pass.
-- Matrix estimates expose count/ESS/uncertainty and route below-threshold cases to direct conditioned simulation.
-- Direct server jobs are idempotent/cacheable, bounded and isolated from publication; overload/failure remains honest.
-- Representative NFL/MLB and postseason-in-progress scenarios pass mobile/runtime/payload budgets or approved feature-specific degradation.
-- No output/API/UI uses “exact” for filtering/simulation or “clinched” without Phase 5E proof.
+- **Server refinement:** a larger server-side run for a shared scenario, cached by snapshot plus picks.
+- **Faster estimates:** filtering stored per-sim outcomes. This is only valid for a few picks with enough matching sims (D35); otherwise run directly.
+- **"What helps my team most" suggestions:** computed from leverage ([features/13](13-leverage-rooting.md)) and applied as one joint scenario, never by adding individual swings.
+- **NHL:** regulation-loss and overtime picks once the NHL outcome model exists.

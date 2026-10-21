@@ -1,206 +1,150 @@
-# 90 — Build Order, Dependencies, and Phase Gates
+# 90 — Build Order
+
+**Status: DRAFT v3 (2026-10-21).** Re-planned for a late-2026 NFL launch (D43), now around Dec 16, so that our own clinch statuses can ship at launch (D50). Milestones use "done when" checks instead of formal gates (D45). Dates are targets for solo plus agent-assisted work. When time runs short, cut scope (features, polish), not correctness of tiebreakers or clinch statuses.
+
+**Calendar anchors (approximate):**
+
+| Event | Date |
+|---|---|
+| NFL Week 14 | ~Dec 10–14 |
+| NFL Week 15 | ~Dec 17–21 |
+| NFL Week 18 | ~Jan 9–10, 2027 |
+| Wild Card weekend | ~Jan 16–18 |
+| Super Bowl | mid-February |
+| NHL regular season ends | Apr 10, 2027 (84-game season) |
+| NBA regular season ends | mid-April |
+| MLB Opening Day | late March 2027 |
 
-**Status: DRAFT v2 (2026-07-22).** Dates are targets for solo + agent-assisted development. Gate evidence, not calendar pressure, authorizes progression (D39). The September NFL launch remains a target only if Phase 4 passes.
+## M0 — Engine spike (Oct 22 – ~Nov 2)
 
-## Phase 0 — Contracts, upstream foundation, and risk prototypes
+**PlayoffOdds**
 
-**Depends on:** confirmed SportsCrunch boundary D30; no application scaffold.
+- Set up JavaScript workspaces with `packages/standings`, `packages/engine` and `packages/cli`, using TypeScript and Vitest. The Laravel app can wait for M1.
+- **Standings:**
+  - Write `rules/nfl/2020.md` from the official NFL procedure, with citation and retrieval date.
+  - Implement the `nfl@2020` module, scenario fixtures, and golden fixtures for 2020–2025 (games exported from SportsCrunch, official seeds with sources).
+- **Engine:**
+  - The full NFL regular season and playoffs per [01](01-simulation-engine.md).
+  - Keyed, counter-based randomness.
+  - Port the drift team walk from PoolCrunch's `driftgen.py`, with parameters copied from `line_drift_generator_v2.json`.
+  - The measured tie rate.
+- **CLI:** `simulate` and `standings` commands, bundled to single files.
+- **Spike script:** a throwaway script that pulls the live 2026 NFL season from the SportsCrunch API, builds `SimInput` (ratings via the anchor fit if the endpoint isn't ready), runs 100k sims and prints a table.
+
+**SportsCrunch**
+
+- Start the ratings endpoint ([03](03-sportscrunch-integration.md) §4).
+- Confirm that `is_projected` (or equivalent) is available for current games.
+
+**Done when:**
+
+- All 2020–2025 golden seeds pass.
+- The drift variance curve matches PoolCrunch's artifact.
+- 100k sims on the live 2026 season run in about 10 s or less, or there is a plan to get there.
+- The odds look sane next to public models (ESPN FPI, NYT).
+- With all games final, sim seeds equal deterministic seeds.
 
-**Deliverables**
+## M1 — Pipeline (~Nov 2 – ~Nov 16)
 
-- Freeze canonical terminology, local ERD/DTO boundaries, `SnapshotBundle` canonicalization/retention/replay contract, `PostseasonState`, binary plane semantics, publication pointer and correction policy (docs 01–04/06).
-- SportsCrunch: canonical rules JSON Schema/canonicalization, current MLB/NFL rule artifacts + citations + shared fixtures, immutable selection, PHP evaluator, and exact-`as_of` standings endpoints with `official`/`if_season_ended` modes. Ratings/parameters and required teams/games/end-type/exception fields become contract-tested versioned APIs.
-- PlayoffOdds: TypeScript generic rule evaluator prototype; shared primitive/procedure/golden differential harness; consumer-driven SportsCrunch contract tests.
-- Assemble one retained canonical MLB bundle, rebuild local baseline, compare PHP/TypeScript, simulate a representative batch, persist a prototype result, and replay offline under the recorded runtime envelope.
-- Prototype corrected outcome math (NFL W/L/T, NHL constrained classes, overlap batching, integer scores) and benchmark representative 100k server and 2k/5k mobile workloads. Record results; do not promote planning estimates to guarantees.
-- Research/select proof-safe method candidates and dependency-graph representation for Phase 5E; no early product flags required.
-- Verify current supported framework/package versions and O1. Proposed default: Laravel 13 + Inertia 3 + Vue 3 + TypeScript. Verify SSR/no-JS approach, Node supervision/deploy coupling, and rollback before scaffolding.
-- Threat model, privacy/retention draft, data/license/team-mark inventory, accessibility test plan, deployment topology, backup/restore design, capacity/cost model, and proposed O4/O7 targets.
-- Verify the exact small API/MCP discovery/fetch contract and current vendor/package requirements; record separate OAI-SearchBot/GPTBot O2 choice for later launch configuration.
+- Scaffold Laravel 13 with the official Vue starter kit (D37), MySQL `podds` and Horizon, after confirming current versions.
+- Mirror tables and a SportsCrunch client; scheduled sync.
+- Snapshot job per [02](02-simulation-outputs.md) §3: build input, skip if unchanged, store gzipped input, run the CLI, publish in a transaction, leave current untouched on failure.
+- Triggers: daily schedule, webhook or poll after game finals (debounced), and an artisan command for manual runs.
+- Backfill the 2026 NFL season from Week 1 as `reconstructed` daily snapshots.
+- A minimal internal view or artisan command to list snapshots, their diagnostics and failures.
+- **SportsCrunch:** ship the ratings endpoint, then start the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
+
+**Done when:**
+
+- The pipeline has run unattended on the server through at least one NFL weekend.
+- History exists from Week 1.
+- A forced failure leaves current intact.
+- Re-running a stored input with its seed reproduces the same numbers.
+
+## Clinch track (~Nov 2 – ~Dec 4, in parallel with M1/M2)
+
+Per [features/14](features/14-clinch-magic-elimination.md) §3–4:
+
+- **Solver choice:** prototype the integer-program approach (WebAssembly solver in Node) against a custom branch-and-bound on real Week 12–14 states, and pick one.
+- **`computeClinch`** for NFL targets (playoff spot, division, top seed) with conservative tiebreaks, simulation screening, per-problem time caps and controls-own-destiny.
+- **Brute-force harness:** exhaustive enumeration for small leagues and the last one or two weeks of real seasons.
+- **History replay:** NFL 2020–2025, week by week.
+- **Integration:** the `clinch` CLI command; snapshot job writes `clinch_statuses`.
+
+**Done when:**
+
+- Zero disagreements with brute force.
+- Zero false clinches or eliminations across 2020–2025.
+- Lag versus official recorded.
+- A snapshot's clinch step fits comfortably inside the snapshot job, on the order of seconds.
+
+## M2 — Site (~Nov 16 – ~Dec 11)
+
+- Decide **O8** (how pages render without JavaScript) at the start.
+- Build the pages in [features/10](features/10-core-odds-displays.md) and [features/11](features/11-history-timeseries.md):
+  - home page;
+  - `/nfl` odds table;
+  - `/nfl/seeds`;
+  - `/nfl/{team}` with history chart and remaining schedule;
+  - `/methodology`.
+- Clinch badges from `clinch_statuses`, plus official-only badges where the crawl is ahead of us.
+- `as_of` everywhere, a stale banner, and ">99.9%"/"<0.1%" formatting.
+- Search basics from [05](05-agent-and-search-discovery.md) §1–2.
+- Mobile-first layout.
+
+**Done when:**
+
+- The pages work on a phone.
+- The answer sentence and tables appear in the raw HTML.
+- Numbers and statuses on the pages match the current snapshot rows.
+
+## M3 — Launch (~Dec 16, before Week 15)
 
-**Exit gates**
+- Complete the launch checklist in [06](06-cross-cutting-requirements.md) §1, including O2.
+- Production deploy, domain and CDN.
+- A few days of private sharing, then public.
 
-1. Zero material PHP/TypeScript differences across every shared MLB/NFL current primitive/procedure fixture and agreed golden/edge corpus; invalid checksum/schema/selection tests fail closed.
-2. The MLB prototype bundle includes all required bytes/lineage, replays with no network, and reproduces declared binary/aggregate checksums within the exact replay envelope.
-3. Failure injection proves parity mismatch, bad rule checksum, missing required input, and upstream outage cannot advance a publication pointer prototype.
-4. Benchmarks report p50/p95 runtime, memory, artifact bytes/compression/decode and mobile conditions; any missed target has an accepted degradation/optimization plan.
-5. O1 is decided; security-supported versions and SSR/no-JS topology are documented. Phase 1 scaffolding does not begin with a placeholder framework choice.
-6. Cross-cutting Phase 0 artifacts exist and any material legal/upstream blocker is named `BLOCKED`, not deferred invisibly.
+**Done when:** the site is public and the checklist is complete.
 
-**Failure/rollback:** No public current pointer exists. Failed candidates/fixtures are quarantined; the affected league does not advance. PlayoffOdds may continue contract/prototype work while SportsCrunch gaps are repaired, but cannot claim trustworthy simulation.
+## M4 — Late NFL season (Dec – Jan)
 
-**Deliberately deferred:** production UI, production scheduling, broad historical backfill, exact clinch product, push, lottery, full public API/MCP/key ecosystem.
+In priority order (D49, D50, D51):
 
-## Phase 1 — Narrow vertical proof: MLB first, then NFL
+1. **Clinching scenarios** ([features/14](features/14-clinch-magic-elimination.md) §5): "clinches with…" on team pages and a league scenarios page. Target Week 16, when they matter most.
+2. **NFL postseason:** resume from actual playoff results ([01](01-simulation-engine.md) §7) and show a playoff bracket view. **Must be live by Wild Card weekend.**
+3. **Result-coupled drift** ([01](01-simulation-engine.md) §4), then the **picker** ([features/12](features/12-interactive-picker.md)): the engine in a Web Worker, pick winners, shareable URL. Aim for Weeks 17–18 if possible; otherwise it debuts for the NFL playoffs and the NBA/NHL seasons.
+4. **JSON API + MCP** ([features/16](features/16-public-api.md), [05](05-agent-and-search-discovery.md) §3); O3 before announcing the API.
+5. **Calibration check** from the doc 06 backlog, using 2026 data.
 
-**Depends on:** Phase 0 gates; current MLB and NFL rule/contracts available before each league starts.
+## M5 — NBA and NHL (Jan – Mar 2027)
 
-### 1A — MLB vertical
+- **For each league:**
+  - re-run PoolCrunch's drift measurement on its line history;
+  - rules module, `.md` source and golden seasons ([04](04-standings-tiebreakers.md) §9);
+  - clinch targets;
+  - league bracket in the engine;
+  - mirror and pipeline config;
+  - pages.
+- **NBA:** play-in, including "clinched at least a play-in spot"; SportsCrunch flags the NBA Cup final.
+- **NHL:** six outcome classes; SportsCrunch stores end type; goal-based steps.
+- Aim to have both live before the March stretch runs.
 
-- Minimal selected web/worker repository scaffold plus pure TypeScript engine.
-- Local league/team/season/season-team/game materialization.
-- Exact bundle assembly from SportsCrunch, local standings/qualification/seeding, anchored/dynamic simulation, postseason-state fixture, aggregate + versioned matrix persistence, parity and offline replay.
-- Minimal operator inspection only: candidate lineage, baseline diff, aggregate table and artifact/replay report. It is not a public product UI.
-- Calibration/evaluation report on agreed held-out cutoffs, clearly labeled captured/reconstructed/frozen-modern as applicable.
+## M6 — MLB (by Opening Day 2027)
 
-**1A exit:** at least 20 representative live/reconstructed cutoffs including late-race/edge fixtures publish through the local proof pipeline with zero material parity/input/invariant failures; repeated exact-envelope replay succeeds; no untriaged material anomaly; representative 100k run meets the accepted Phase 0 target or approved safe-degradation envelope; postseason-in-progress fixture resumes rather than restarts.
+- MLB drift measurement, rules module and golden seasons (2022+ format).
+- Magic and tragic numbers ([features/14](features/14-clinch-magic-elimination.md) §6).
+- Performance work for 162-game schedules.
+- Check pitcher-aware anchors.
 
-### 1B — NFL vertical
+## Anytime after M3
 
-- Add NFL schedule/outcome/bracket modules without changing core interfaces or duplicating rules.
-- Validate probability-preserving W/L/T and integer score accumulators; exercise SOV/SOS and deep multi-team dependency fixtures.
-- Run against the latest completed NFL season and representative current preseason inputs.
+- **SportsCrunch PHP standings wrapper** ([03](03-sportscrunch-integration.md) §7), when SportsCrunch needs standings or clinch statuses; decide O9 first.
 
-**1B exit:** zero material differential mismatch on the NFL corpus; categorical probabilities/rounding/accumulators pass properties; official final standings/seeds match curated fixtures across the agreed supported era set; runtime/replay/invariant gates pass on representative production hardware.
+## Later
 
-**Failure/rollback:** A failed league remains disabled and cannot contaminate the other. Dynamic evolution can roll back to versioned `eta=0` if proper-score/calibration gates fail; rules parity, exact bundle retention and input validation cannot be bypassed.
-
-**Deliberately deferred:** unattended operations, public pages, proof-safe clinch/magic, NBA/NHL, picker/leverage, draft and notifications.
-
-## Phase 2 — Production data spine and atomic publication
-
-**Depends on:** Phase 1A; Phase 1B before NFL production activation; doc 02/06 contracts.
-
-**Deliverables**
-
-- Production `podds` schema for all local identities/schedule/events/snapshot games/standings/odds/artifacts/pointers plus immutable correction lineage.
-- Scheduler and signed-event ingestion; fresh-pull reconciliation; spine/intraday classification; idempotent candidate orchestration; bounded retries/backoff, dead-letter/quarantine and operator replay.
-- Permanent canonical bundles/source/rule lineage; versioned matrices/client payloads; artifact checksums and retention/pruning audit.
-- Validation/parity/simulation/persist gates followed by atomic compare-and-swap publication pointer; current site/service reads last-good local data only.
-- Data-quality/anomaly/correction workflow; stale/degraded status; no partial publication.
-- Observability, alert/runbooks, queue isolation, capacity/cost tracking, backups and isolated restore + offline replay.
-- Current MLB daily spine plus debounced intraday operation; add NFL when 1B passes. Backfill only dates whose reconstruction coverage passes D34 labeling/gates.
-
-**Exit gates**
-
-1. Two continuous weeks of unattended MLB operation with every expected spine accounted for, ≥99% within the proposed 30-minute window when upstream prerequisites are available, zero duplicate current publications, zero material parity publications, and all failures reconciled/audited. Final thresholds follow O7.
-2. Upstream outage, parity failure, worker crash, duplicate webhook, malformed input, artifact-write failure and post-write/pre-pointer crash tests leave the prior pointer/current pages intact.
-3. DB/artifact restore in isolation meets the proposed O4 envelope, serves a last-good snapshot and completes offline replay.
-4. Tonight/history/notification-candidate queries use only local materialization and meet representative query budgets.
-5. A late correction creates a new linked snapshot revision and visible event; the old immutable snapshot remains addressable.
-
-**Failure/rollback:** Keep/restore the prior verified pointer via audited update, pause the affected league pipeline, serve honest stale timestamp/banner, and quarantine the candidate. Never fetch upstream in a render to hide pipeline failure.
-
-**Deliberately deferred:** exact clinch/magic flags, broad UI, API keys/downloads, push delivery, advanced conditionals.
-
-## Phase 3 — Core public experience plus small agent/API slice
-
-**Depends on:** Phase 2 soak; O1-selected stack; accessibility/privacy/security foundations.
-
-**Deliverables**
-
-- League standings/odds table, team page, seed matrix, and one basic odds-over-time chart using spine points; mobile-first semantic components.
-- Visible `as_of`, current/spine/reconstruction/correction semantics and exact snapshot/rules/model lineage links.
-- Methodology/model card with calibration/coverage/limitations, rule verification evidence and retrospective-history disclosures.
-- Useful SSR/no-JavaScript HTML for current tables/pages; supervised SSR Node process if retained; accessible table/chart alternative, keyboard/focus/reduced-motion/contrast behavior.
-- Stable canonical routes, error/stale/unavailable states, caching keyed by snapshot/pointer version.
-- **Small anonymous read API:** discovery/leagues/teams, current odds/standings, seed distribution, snapshot fetch and basic spine series using stable v1 DTOs.
-- **Basic MCP slice:** discovery/search and fetch of the same canonical resources, including structured content and a non-empty canonical URL. Exact supported search/fetch behavior follows the verified Phase 0 contract.
-
-**Exit gates**
-
-1. Critical pages pass automated and manual keyboard/no-JS/screen-reader sampling toward WCAG 2.2 AA; odds/timestamps/table relationships remain useful without hydration.
-2. No SportsCrunch/simulation call occurs in request/render tests; last-good/stale and missing-data behavior is correct.
-3. Representative mobile/web performance and SSR restart/health/rollback gates pass; deploy manifests reject mixed engine/SSR/client compatibility.
-4. API DTO/error/validation/ETag/rate-limit/version contract tests pass; MCP search/fetch returns canonical non-empty URLs and structured text suitable for citation.
-5. MLB is fully inspectable on staging and NFL current/preseason data is ready only if its Phase 1/2 gates passed.
-
-**Failure/rollback:** Roll back the coupled app/SSR/assets release; immutable snapshots/pointer remain. Disable a failing API/MCP route behind a controlled feature flag while core pages continue; do not change DTO semantics silently.
-
-**Deliberately deferred:** multiple chart types/polish, picker, leverage/rooting, proof-safe clinch, push, keys/bulk downloads and full MCP listings.
-
-## Phase 4 — Beta, soft launch, and public-launch gate
-
-**Depends on:** Phase 3; Phase 2 continues meeting freshness/replay gates; launch leagues individually qualified.
-
-**Deliverables**
-
-- Private beta then rate-limited public soft launch for MLB/NFL; feedback/correction channel and status communication.
-- Production-shaped load/capacity/cost test including slate burst, crawlers, anonymous API/MCP and one process/worker loss.
-- Independent/focused security review; legal/license/marks/terms/privacy/attribution approvals; O2 crawler matrix implemented distinctly for discovery versus training.
-- Alert/runbook/on-call review; backup restore, bad deploy, bad snapshot/pointer and SSR/worker restart drills; measured rollback time.
-- Search/canonical/sitemap registrations and WAF/CDN bot behavior verified, not assumed. Model card/citation guidance live.
-- Launch success/error-budget baseline and O7 sign-off.
-
-**Exit gates**
-
-1. No unresolved critical/high security, material legal/license/mark, WCAG-critical-task, parity/replay or data-quality blocker.
-2. Load test meets approved availability/latency/queue/headroom/cost limits; overload degrades through bounded 429/queue/stale-read behavior without starving publication.
-3. Full restore and deploy/pointer rollback drills meet O4 targets; alerts fire and link to correct runbooks.
-4. Beta shows correct freshness/correction/citation behavior for an agreed observation window; anonymous API/MCP abuse controls and cache isolation pass.
-5. Owner signs the launch checklist. “Fix in week one” is not an exit criterion.
-
-**Failure/rollback:** Remain private/soft-launched or roll back app/pointer to last verified state. Disable the affected league/feature with explicit unavailable/stale messaging. Calendar target slips rather than waiving a hard gate.
-
-**Deliberately deferred:** advanced features below; public launch needs only the small API/MCP slice, not the full developer platform.
-
-## Phase 5A — Interactive picker
-
-**Depends on:** retained compatible client payloads/matrices, direct conditioned simulation capacity, accessible worker UI.
-
-**Deliverables:** stable URL pins; canonical scenario seed; immediate 2k then additive 5k client refinement; conditional-matrix estimate only when pin-count/ESS gate passes; direct conditioned server fallback; uncertainty/ESS diagnostics; stale/corrected game handling; full `PostseasonState`/rules/build compatibility.
-
-**Exit:** representative mid-range mobile p95 target, worker memory/payload budgets or accepted degradation; identical shared scenarios use identical seed/state; low-ESS never masquerades as precision; accessibility/security/load tests pass.
-
-**Failure/rollback:** client-only or server-refinement feature flag can disable independently; fall back to static current odds with honest unavailable state.
-
-**Deferred:** NHL loser-point UI and bulk/full-season pin UX until measured.
-
-## Phase 5B — Leverage and rooting
-
-**Depends on:** conditionals with branch counts/uncertainty, local game state, picker links for joint scenarios.
-
-**Deliverables:** tonight slate, team rooting page, local game badges and event annotations; conditional MC language; direct conditioned scenario for multi-game paths.
-
-**Exit:** branch sample/ESS suppression works; intraday reranking uses current local pointer; uncertainty and non-additivity are tested/disclosed; load/notification-candidate isolation passes.
-
-**Failure/rollback:** suppress low-quality rows/page while odds remain available. No re-simulation occurs in request rendering.
-
-**Deferred:** in-game interpolation until a contract-tested local live-win-probability feed exists.
-
-## Phase 5C — NBA onboarding
-
-**Depends on:** canonical NBA rules/artifacts/fixtures and as-of standings; calibrated score model; play-in `PostseasonState`/bracket.
-
-**Deliverables:** parity/replay/calibration/current pipeline plus core UI/API/MCP for NBA.
-
-**Exit:** same league gates as Phase 1/2, including deep rule/play-in/postseason fixtures and representative runtime/capacity.
-
-**Failure/rollback:** NBA remains disabled; no generic core or other league is forked.
-
-**Deferred:** NBA lottery until Phase 6 rule validation.
-
-## Phase 5D — NHL onboarding
-
-**Depends on:** REG/OT/SO upstream data, canonical NHL artifacts/fixtures, constrained six-terminal-class model, postseason state/bracket.
-
-**Deliverables:** parity/replay/class calibration/current pipeline plus core UI/API/MCP for NHL.
-
-**Exit:** class probabilities sum/preserve anchor, outcome/end-type coverage is complete, points/RW/ROW/GF/GA parity fixtures pass, runtime/capacity and postseason resume gates pass.
-
-**Failure/rollback:** NHL remains disabled or explicitly unsupported for affected eras; never infer end types.
-
-**Deferred:** regulation-loss picker option until 5A extension passes.
-
-## Phase 5E — Proof-safe clinch, elimination, control, and magic
-
-**Depends on:** rule dependency metadata, validated evaluator, Phase 0 research, curated official announcement/history fixtures.
-
-**Deliverables:** versioned dependency graph; proven DP/SAT/MILP/branch-and-bound or other selected exact solver by league/target; witness/counterexample artifacts; tri-state proof status; per-opponent/scenario-dependent magic semantics; curated historical/edge parity.
-
-**Exit:** solver soundness/completeness for its declared supported dependency set; independent brute-force agreement on bounded fixtures; no false positive across curated official cases; timeout/unsupported always returns `unknown/not_proven`; operational time/memory budgets and cancellation pass.
-
-**Failure/rollback:** withhold deterministic badge/number and show probability only. A displayed 100.0% estimate is never relabeled clinched.
-
-**Deferred:** unsupported league/era/target dependencies stay explicit, not approximated as proof.
-
-## Phase 6 — Product and developer-platform expansion
-
-**Depends on:** Phase 4 foundations and the applicable 5x feature/league gates.
-
-- Hardened Web Push: iOS Home Screen/user-gesture onboarding, unsubscribe/deletion, 404/410 cleanup, caps/expiry/idempotency, stale/correction/retraction handling (features/15).
-- Draft/lottery: joint season-world, without-replacement draws and validated era eligibility/team-state rules; unsupported MLB module remains blocked (features/17).
-- Public API/MCP expansion: accounts-lite keys/higher limits, pagination/bulk CSV, broader history/intraday/leverage resources, complete docs/OpenAPI, registry/directory submission where worthwhile. This expands—not creates—the Phase 3/4 read surface.
-- Additional charts, live approximations, model/player context and other experiments only with their own data contracts/gates.
-
-Each expansion repeats threat/privacy/accessibility/legal/load/rollback review. Failure disables the new surface without weakening current snapshot publication or core public reads.
+- Exact tiebreaks inside the clinch search ([features/14](features/14-clinch-magic-elimination.md) §8).
+- Leverage and rooting ([features/13](features/13-leverage-rooting.md)).
+- Push notifications ([features/15](features/15-notifications-mobile.md)).
+- Draft and lottery odds ([features/17](features/17-draft-order.md)).
+- API expansion ([features/16](features/16-public-api.md) §5).
+- Hardening backlog items ([06](06-cross-cutting-requirements.md) §2).

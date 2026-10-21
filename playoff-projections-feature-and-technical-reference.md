@@ -1,6 +1,6 @@
 # Playoff Projections: Feature Catalog & Technical Implementation Reference
 
-**Status: REFERENCE — amended 2026-07-22.** This competitive catalog is background, not the PlayoffOdds implementation contract. The versioned documents under [`docs/plan/`](docs/plan/00-overview.md) and the decision log control where product-specific architecture, sequencing, evidence gates, or terminology differ. Market/vendor details here must be reverified before use.
+**Status: REFERENCE — amended 2026-10-21.** This competitive catalog is background, not the PlayoffOdds implementation plan. The documents under [`docs/plan/`](docs/plan/00-overview.md) and the decision log win wherever architecture, sequencing or terminology differ. Market and vendor details here must be reverified before use.
 
 Compiled from the competitive survey of FanGraphs, Baseball Prospectus, MoneyPuck, The Athletic, ESPN FPI/BPI, FTN/DVOA, Basketball-Reference, PlayoffPredictors, PlayoffStatus, Sports Club Stats, Inpredictable, Tankathon, Neil Paine, and the defunct FiveThirtyEight.
 
@@ -270,7 +270,7 @@ The problem: a user toggles a game and needs updated probabilities in under ~200
 
 **(c) Hybrid.** Client-side for immediate feedback, then a server request for a high-precision result that swaps in a second later.
 
-For PlayoffOdds, the confirmed engine is a pure shared TypeScript package running in supervised Node and browser workers. Laravel serves only locally published outputs; no simulation or SportsCrunch call runs in a normal request path. A future sidecar/WASM/Rust alternative requires measured justification.
+For PlayoffOdds, the engine is a pure shared TypeScript package. It runs as a Node CLI for scheduled snapshots and in a browser Web Worker for the picker, which starts with option (b) and may add (c) later. Laravel serves only locally published outputs; no simulation or SportsCrunch call runs in a page request.
 
 ## 8. Data sources
 
@@ -290,8 +290,15 @@ MoneyPuck — a one-person operation — runs Python on AWS and updates many tim
 - **Sim job:** queued supervised TypeScript/Node worker for PlayoffOdds; simulation counts and vectorization strategy are benchmarked on representative bundles.
 - **Snapshot store:** retain captured daily outputs and exact canonical input bundles permanently. Retrospective backfill can add useful history only where cutoff inputs/rules/models are reconstructable and clearly labeled.
 - **Serving:** Laravel reads precomputed snapshots. No live simulation in the request path.
-- **Client:** ship a complete compatible payload: remaining games/timing/site, ratings/state, standings baseline, bracket/PostseasonState, pinned rule artifact and engine-build contract.
+- **Client:** ship the snapshot's own input file (games, probabilities, ratings, postseason state) plus the engine bundle, so the browser simulates exactly what the server did.
 
 ## 10. PlayoffOdds build-order application
 
-The generic catalog translates into the evidence-gated roadmap in [`90-build-order.md`](docs/plan/90-build-order.md): contracts and SportsCrunch rules/standings first; an MLB vertical proof then NFL; production immutable snapshot spine; accessible core UI plus a small anonymous API/MCP slice; beta/launch gates; then picker, leverage, NBA, NHL and proof-safe clinch work; hardened push, draft and developer-platform expansion later.
+The generic catalog translates into the milestones in [`90-build-order.md`](docs/plan/90-build-order.md):
+
+- NFL standings engine and simulator;
+- snapshot pipeline;
+- core pages, launching in the late 2026 NFL season;
+- then NFL postseason, the picker and the API/MCP;
+- then NBA and NHL, and MLB for 2027;
+- leverage, proven clinch statuses, push and draft odds later.

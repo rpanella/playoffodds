@@ -1,77 +1,33 @@
 # Features 13 — Leverage, Tonight, and Rooting Guides
 
-**Status: DRAFT v2 (2026-07-22).** Phase 5B; all branch values are conditional Monte Carlo estimates with diagnostics.
+**Status: DRAFT v3 (2026-10-21).** Later feature. All values are simulation estimates.
 
-## 1. Definitions
+## 1. What it shows
 
-For affected team `T`, game `G` and modeled outcome classes `c`:
+For a team **T** and an upcoming game **G**, the key numbers are T's playoff odds if each side of G wins:
 
-- `P_T(c)` is the estimated target probability conditional on outcome class `c`.
-- For a binary decisive game, signed swing is `P_T(home win) - P_T(away win)`.
-- For multi-valued NFL/NHL games, the stored vector retains tie/regulation/extra-time classes. A simplified “root for team” comparison may pool classes only with a declared weighting/semantic; regulation-loss implications remain separately expressible.
-- A ranking leverage metric combines dispersion across conditional values with the modeled outcome probabilities. Its exact versioned formula is internal/ranking-only and handles all outcome classes; it is not forced into a binary `2p(1-p)` framing for NHL.
-- League-wide game leverage aggregates team-level ranking values using a declared target set and normalization so cross-date/league comparisons are not implied accidentally.
+> "Bills playoff odds: 61.3% if the Jets win vs 55.1% if the Dolphins win."
 
-Display the concrete conditional pair/vector and uncertainty, not the opaque index. Swings are not additive. “Everything goes right” is a joint picker/direct-conditioned scenario.
+- **Swing** is the difference between those two numbers.
+- **Leverage** for ranking combines the swing with how uncertain the game is, for example `swing × 2·p·(1−p)` for a two-outcome game. The index is used only to rank; pages show the conditional numbers.
 
-## 2. Estimation and quality gates
+## 2. How to compute it
 
-`game_conditionals` is derived from the same published matrix/worlds and stores branch sample count/ESS, standard error/interval, method/build and suppression reason. It is not “zero extra uncertainty” and never labeled exact.
+There's no need for extra simulation runs. During the normal snapshot run, the engine can accumulate conditional counts for games in the next few days: for each game × outcome × team, count playoff appearances (and other headline outcomes) in the worlds where that outcome happened. This gives every game's split for every team in one pass, without storing per-sim results.
 
-- Publish a branch only when all displayed outcome classes meet the Phase 5B sample/ESS and uncertainty gates.
-- Rare multi-valued branches can use stratified/direct conditioned computation if product value justifies it; otherwise show unavailable rather than a noisy number.
-- Rows below an effect-size display floor may be omitted, but diagnostics remain and the floor is above measured sampling noise.
-- Joint paths and scenario cards use features/12 direct conditioned simulation when matrix ESS is inadequate.
+Store the results in a `game_conditionals` table per snapshot with the counts, so pages can show sample sizes and hide noisy rows.
 
-## 3. Local data sources
+## 3. Surfaces
 
-- Current slate/status/start/neutral/finality: local `games` and `game_change_events`.
-- Snapshot identity and current semantics: `publication_pointers`/`snapshots`.
-- Branch estimates: `game_conditionals` linked to immutable matrix/build.
-- Team context: `team_odds` and `snapshot_team_standings`.
-- Annotations/corrections: `snapshot_events`.
+- **`/nfl/tonight`, or "this week" for the NFL:** upcoming games ranked by league-wide leverage. Each card shows the most affected teams and their conditional odds.
+- **Team rooting guide:** the team's own game first, then other games by how much they matter to this team, with "root for X".
+- **Schedule badges:** high, medium or low stakes on the team's upcoming games.
+- **"Best case this week" link:** opens the picker with the favorable outcomes as one joint scenario.
 
-No page or notification candidate calls SportsCrunch or simulates in the request path.
+## 4. Rules
 
-## 4. Surfaces
-
-### `/{league}/tonight`
-
-Use the league-local current slate with actual start times and status. Rank eligible games by the versioned leverage metric. Cards show matchup, start/status, anchor probability/source warning, the top affected teams, conditional outcome values and an estimate/uncertainty disclosure. Intraday pointer advance recomputes the remaining slate from new stored rows.
-
-### Team rooting page
-
-Show the team's own game first, then other current-slate games by estimated impact. Text says, for example, “Estimated playoff chance: 61.3% if A wins vs 55.1% if B wins,” with interval/details. NHL can state “needs a regulation loss” only when the class-level result supports it.
-
-The “best case tonight” link canonicalizes favorable outcome classes and sends one joint scenario to the picker; it never sums individual swings.
-
-### Team schedule badges
-
-Only games inside the published conditional horizon with quality-passing rows receive a badge. Missing/low-ESS rows show no fake tier. Badge/tooltip content is keyboard/touch accessible and has a textual alternative.
-
-## 5. Language and proof separation
-
-Use “estimated swing,” “root for,” and conditional values. Do not say a result clinches/eliminates unless Phase 5E returns `proven` evidence or the official standings source declares the status. A 100% branch estimate remains probabilistic.
-
-Correction events can reverse a previously sent impact story. Current pages display the corrected snapshot/event; notification policy handles retraction separately.
-
-## 6. Live in-game approximation (deferred)
-
-With a future contract-tested local live win-probability feed, binary pregame branches can be interpolated for one active game and labeled **live estimate**. Multi-game overlap, ties and NHL class probabilities require a declared approximation; independence interpolation is not presented as exact.
-
-This remains deferred until the feed is locally materialized with timestamps/quality and evaluated. It is not a Phase 0 SportsCrunch requirement and never causes live upstream calls from rendering.
-
-## 7. API and caching
-
-Feature endpoints return stable DTOs over current snapshot/game/branch estimates, with decimal units, class semantics, branch counts/ESS/uncertainty, exact `as_of`, correction warning and canonical URL. Current responses revalidate by pointer version; immutable snapshot variants cache by checksum. Broader public API/MCP exposure may land in Phase 6, but site DTOs are public-shaped from first implementation.
-
-## 8. Phase 5B acceptance and failure
-
-- Binary and multi-valued fixture calculations match the declared metric and never drop NHL loser-point/tie semantics silently.
-- Every displayed branch passes sample/ESS/uncertainty gates and exposes diagnostics; suppressed rows remain absent/unknown.
-- Current/intraday/final/corrected slate transitions use local materialization and do not show stale games as upcoming.
-- Joint scenarios use conditioned computation; UI/tests prohibit swing summation.
-- Keyboard/touch/no-color/reduced-motion and mobile layouts pass doc 06 gates.
-- Load/overload does not compete with publication capacity.
-
-On missing matrices, low ESS, stale pointer or failed recomputation, suppress the affected estimate/page module and keep core odds available with an honest unavailable state.
+- **Swings are not additive.** "Everything goes right" is a joint scenario computed by the picker, never a sum of individual swings.
+- **Hide noisy rows.** Rows where one outcome has too few matching sims are hidden.
+- **No clinch claims.** A conditional 100% is not "clinches"; that needs a proof ([features/14](14-clinch-magic-elimination.md)).
+- **Multi-outcome games.** For NHL (and NFL ties), outcomes have more than two classes. Keep them separate, for example "needs a regulation loss", or pool them with a stated rule.
+- **Live in-game odds** are deferred until a live win-probability feed exists. The approach would be interpolating between the two pregame branches.

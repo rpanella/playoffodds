@@ -1,182 +1,168 @@
-# 01 — Simulation Engine Contract
+# 01 — Simulation Engine
 
-**Status: DRAFT v2 (2026-07-22) — architecture and acceptance gates; calibration parameters remain measured Phase 0/1 outputs.**
+**Status: DRAFT v3 (2026-10-21).** NFL first (D43). Drift follows D51; the rest of the parameters are starting values to check after launch.
 
-`@playoffodds/engine` is a pure TypeScript package consumed by a Node worker and, for the picker, a browser worker. It performs no network, database, filesystem, clock, locale, or ambient-randomness I/O. It receives an exact pinned bundle and returns versioned results.
+`@playoffodds/engine` is a pure TypeScript package. It takes one `SimInput` and returns aggregate odds. It runs as a Node CLI spawned by a Laravel queue job, and later inside a browser Web Worker for the picker. It uses `@playoffodds/standings` ([04](04-standings-tiebreakers.md)) for every standings, tiebreak and seeding decision.
 
-## 1. Invariants and ownership
+## 1. Rules for the engine
 
-1. **Pure and pinned.** All games, state, parameters, bracket configuration, and the exact SportsCrunch rule artifact are explicit inputs.
-2. **Local evaluation.** The engine never calls SportsCrunch. Its generic TypeScript rules evaluator implements doc 04 and must pass PHP/TypeScript differential tests.
-3. **Full-world consistency.** Each simulated future produces one coherent regular-season, postseason, and draft-relevant world. Known results are never resimulated.
-4. **Deterministic within a declared replay envelope.** Same canonical bundle bytes, build, options, recorded runtime envelope, and seed produce identical versioned binary output. Cross-runtime behavior outside that envelope is a conformance test, not an unqualified bit-exact promise.
-5. **No false proof.** Simulation aggregates and matrix filters are estimates. Clinch/elimination/magic proof belongs to the separate subsystem in features/14.
-6. **Rules authored once.** League/year rule definitions come only from the pinned SportsCrunch artifact; PlayoffOdds duplicates only the generic evaluator.
+- **Pure.** No network, database, filesystem, clock or `Math.random`. The CLI wrapper does all I/O.
+- **Keyed randomness (D51).** Every random draw comes from a counter-based generator addressed by `(run seed, sim index, purpose, entity)`, as in PoolCrunch's `ml/simulator/rng.py`.
+  - **Purposes** are a small fixed enum, append-only: drift, outcome, tiebreak, later lottery.
+  - **Entity** is a fixed index in the season's full team or game roster, never "remaining games".
+  - **What this buys:** sims 0–1,999 of a 100k run match a 2k run. Results don't depend on thread scheduling. Pinning one game in the picker leaves every other draw unchanged.
+  - Pick a well-known counter-based algorithm (for example Philox, or a keyed hash such as SplitMix over the key tuple) in M0, version it, and test it.
+- **Deterministic in Node.** Same input, seed and engine version produce the same output. Browser results need not be bit-identical.
+- **Known results are never re-simulated.** Final games and completed playoff games are fixed inputs.
 
-## 2. Canonical `SnapshotBundle`
+## 2. Input (`SimInput`)
 
-Doc 02 owns storage/canonicalization; this engine contract requires these logical sections:
+Built by Laravel from its local mirror of SportsCrunch data ([02](02-simulation-outputs.md)). Example, abbreviated:
 
-| Section | Required content |
-|---|---|
-| Identity | Bundle schema/version, immutable candidate ID, league, season, exact `as_of`, source mode(s), creation instant. |
-| Teams/seasons | Stable team and season-team IDs, season-scoped conference/division alignment, display identity references. |
-| Games | Full relevant schedule and results with stable IDs, actual/scheduled start instant, season type, status/finality, neutral/site, scores/outcome/end type, and anchor/provenance for remaining games. |
-| State | Normalized current standings inputs plus resumable `PostseasonState` (§3). Authoritative SportsCrunch standings are retained for parity, not trusted as a substitute for local rebuilding. |
-| Model | Team ratings/state, declared anchor semantics, calibrated league/outcome parameters, model/parameter IDs and checksums. |
-| Rules | Exact canonical standings rule payload, schema, IDs/checksums, selection explanation, fixture manifest reference. |
-| Playoffs | Versioned bracket/play-in/wild-card configuration, venue/home assignment rules, series format, reseeding behavior. |
-| Lineage | Upstream response artifact checksums, normalization version, warnings/corrections/coverage, and exact cutoff semantics. |
+```json
+{
+  "schema": "sim-input/1",
+  "league": "nfl",
+  "season": 2026,
+  "as_of": "2026-11-03T14:00:00Z",
+  "current_week": 9,
+  "teams": [
+    { "id": "nfl-buf", "name": "Buffalo Bills", "conference": "AFC", "division": "AFC East" }
+  ],
+  "games": [
+    { "id": "sc-210345", "week": 1, "start": "2026-09-13T17:00:00Z", "season_type": "regular",
+      "home": "nfl-buf", "away": "nfl-nyj", "neutral": false,
+      "status": "final", "home_score": 27, "away_score": 17 },
+    { "id": "sc-210512", "week": 10, "start": "2026-11-08T18:00:00Z", "season_type": "regular",
+      "home": "nfl-buf", "away": "nfl-mia", "neutral": false,
+      "status": "scheduled", "p_home": 0.71, "p_source": "market" }
+  ],
+  "ratings": { "scale": "logit", "hfa": 0.20, "source": "sportscrunch", "teams": { "nfl-buf": 0.62, "nfl-mia": -0.15 } },
+  "postseason": { "state": "not_started" },
+  "params": { "sims": 100000, "seed": "01JBQ7…", "tie_rate": 0.00373, "drift": "nfl-line-drift@v2" }
+}
+```
 
-Every ID referenced by a result or feature has a stable mapping in the bundle. Validation rejects unknown teams/games, duplicate IDs, contradictory statuses, missing league-required fields, checksum mismatch, unsupported schema/capability, or impossible postseason state.
+- `p_home` is SportsCrunch's home win probability for that game. `p_source` is `market` or `projected` (from `is_projected`).
+- `ratings` price games that are not on the schedule, meaning playoff matchups (D47, [03](03-sportscrunch-integration.md) §4).
+- `params.drift` names a drift parameter file bundled with the engine (§4). The standings package picks the rule era from `league` + `season`. The engine records the drift and rules IDs in its output.
+- Validation rejects unknown team IDs, duplicate game IDs, final games without scores, scheduled games without `p_home`, and probabilities outside (0, 1).
 
-## 3. Resumable `PostseasonState`
+## 3. One simulated season
 
-The bundle always declares postseason phase: `not_started`, `in_progress`, or `complete`. The state includes, as applicable:
+1. **Baseline.** Build standings from final games once per run (via the standings package). Each sim starts from a copy.
+2. **Draw the drift.** Draw this sim's per-team rating walks (§4).
+3. **Remaining regular season.** Walk unplayed games in rounds: NFL by week; NBA, NHL and MLB by league-local date.
+   - Each game's probability is `sigmoid(logit(p_home) + W_home(h) − W_away(h))`, where `h` is the number of weeks between `current_week` and the game's week and `W_t(h)` is team *t*'s walk at that horizon.
+   - Sample the outcome (§5) and add it to the standings.
+4. **Seeding.** Call the standings engine's fast path to get division winners, playoff teams and seeds for this world.
+5. **Playoffs.** Simulate the bracket from those seeds, or from the actual postseason state once it has started (§7).
+   - Matchups use `sigmoid(r_home − r_away + hfa + W_home(h) − W_away(h))`, with no HFA at neutral sites. `h` is the weeks from now to that playoff round.
+   - Playoff games cannot tie.
+6. **Record** each team's wins/losses/ties, playoff qualification, division title, seed, furthest round and championship.
 
-- bracket/play-in/wild-card node IDs and known matchups;
-- completed postseason games and series with scores/end types;
-- current series scores and home/venue progression;
-- teams already advanced or eliminated;
-- unresolved/conditional remaining bracket nodes and reseeding inputs; and
-- the bracket configuration/checksum that interprets the state.
+## 4. Drift: teams improving and declining (D51)
 
-The engine validates that completed games imply the stated series scores and advancement, no eliminated team remains eligible, and known matchups agree with bracket rules. A simulation starts at the first unresolved node. It does not replay earlier rounds or infer missing state from today's bracket.
+Game odds are today's best estimate, but teams change over a season: injuries, form, news. Each simulated season therefore gives every team its own random rating path, sized from **measured historical line movement**.
 
-Historical snapshots use the state known at their exact cutoff and record whether it was captured or retrospectively reconstructed (D34).
+**Source.** PoolCrunch's fitted NFL generator, `poolcrunch/ml/simulator/params/line_drift_generator_v2.json`. It was fitted on 2014–2025 weekly boards from the SportsCrunch feed and validated against the market's own measured movement. Copy the relevant parameters into `packages/engine/params/nfl-line-drift-v2.json`, keeping the provenance (source path, fit date, measurement digest).
 
-## 4. API and outputs
+**Model.** Port the *team component* of `DriftedWorld._draw` in `poolcrunch/ml/simulator/driftgen.py`. For each team, the walk at horizon `h` is the sum of two independent pieces, each a cumulative sum over steps `k = 1..h`:
 
-The public engine surface accepts a bundle plus explicit options: simulation count, seed/stream range, forced outcomes, whether to record raw outcomes, and requested reducers. It returns:
+- a **coherent walk**: steps with variance `team_walk_var` (≈ 0.0122);
+- a **standing term**: steps with variance `max(0, team_increment_var[k] − team_walk_var)`.
 
-- versioned multi-valued outcome planes for remaining regular/postseason games when requested;
-- versioned per-team finish fields (regular-season record/points, qualification path, seed, round reached, champion, bottom/draft-relevant rank);
-- aggregate probabilities, distributions, reach/fallback counters, and uncertainty diagnostics; and
-- build/rules/parameters/bundle checksums copied into result metadata.
+Every step is a Student-t draw (ν = `student_t_nu` ≈ 4.79) scaled to unit variance, then multiplied by the step's standard deviation. The total variance at `h` is `Σ team_increment_var[1..h]`, for example a standard deviation of about 0.40 log-odds per team at 8 weeks out.
 
-The engine refuses incompatible build/bundle/rule/binary versions. It does not silently upgrade an artifact or reinterpret a stored plane.
+All of a team's games read the same path, which is what makes a team's results move together. Clip extreme draws as PoolCrunch does (±6 log-odds).
 
-## 5. Randomness and replay
+**What is left out:**
+- **PoolCrunch's per-game news and market-wide components.** They are independent from game to game, so they barely change season outcomes. They matter for PoolCrunch because the crowd picks off the board.
+- **The final-week jump** (resting starters). A better version for us ties resting to whether a team has locked its seed in that world. That is a later refinement.
 
-- Use one documented, versioned PRNG implementation shared by Node and browser; ambient `Math.random` is prohibited.
-- Derive independent per-simulation streams from the run seed and simulation ordinal so a 2k client result can extend to 5k without rerunning earlier streams.
-- The server snapshot seed derives from immutable snapshot identity. A picker seed derives from snapshot identity plus the canonical ordered pin encoding (D35), so all viewers of a shared scenario receive the same streams.
-- Record PRNG version, seed, stream range/count, engine source/build ID, package-lock/build checksum, runtime name/version, architecture, relevant numeric flags, and binary serialization version.
-- Phase 0 defines the supported exact replay envelope. If host transcendental behavior prevents cross-runtime byte identity, archived server replay uses the recorded supported runtime/container; Node/browser aggregates must still pass declared differential tolerances and invariant tests.
+**Beyond the fitted range.** The fit covers 17 weeks. Playoff rounds early in the season can be further out; hold the last increment's variance constant beyond 17 and note it as a limitation.
 
-Replay verification reads the retained bundle without network access, validates every checksum, reruns the recorded build/options, and compares binary and aggregate checksums according to the declared envelope. Failures quarantine the artifact and alert; they do not rewrite it.
+**Before the picker (M4): add result coupling.** As ported, the walk is drawn up front and doesn't react to simulated results. Pinning the Bills to win next week wouldn't make them stronger afterwards, though real lines move after wins.
+- Measure from line history how much of a team's weekly rating revision is explained by its result surprise (`actual − expected`).
+- Add that part as an in-sim update after each round: `rating += K × (actual − expected)`.
+- Shrink the walk so total movement still matches the measured curve.
 
-## 6. Information timing and dynamic rating evolution
+**Other leagues.** Re-run PoolCrunch's measurement (`driftmodel.py`, `driftgen.fit`) on NBA, NHL and MLB line history before M5 and M6. Use calendar days or weeks as the horizon unit, as fits each league.
 
-Remaining games are ordered by actual/scheduled start instants and grouped by an explicit **information-overlap policy**, never calendar-date buckets. Games whose playing intervals overlap cannot influence one another. For future games, the bundle carries a derived information-batch ID based on scheduled start plus a versioned league duration/overlap assumption; played games use known start/finality when available.
+## 5. NFL outcomes and ties
 
-Within each information batch:
+Treat the drifted probability as expected home win credit `m`. With tie probability `tau = min(tie_rate, 2·min(m, 1−m))`:
 
-1. Compute probabilities from anchors plus the world's pre-batch team deltas.
-2. Sample every game/outcome in the batch.
-3. Apply standings accumulators for those results.
-4. Apply centered rating-delta updates only after all batch outcomes are fixed.
+- `P(home win) = m − tau/2`
+- `P(tie) = tau`
+- `P(away win) = 1 − m − tau/2`
 
-The pairwise latent update remains zero-sum and its sampled residual is centered as designed. That **does not** prove aggregate mean probabilities remain unchanged after a nonlinear sigmoid. Tests must:
+`tie_rate = 0.00373` is PoolCrunch's measured NFL rate.
 
-- verify update residuals/latent deltas are centered;
-- measure induced probability and aggregate-odds drift against a frozen-delta baseline with confidence intervals;
-- set a product tolerance or recalibrate the update if material drift appears; and
-- validate out of sample with Brier score, log loss, calibration curves/bins, and interval coverage.
+**No scores at launch (D47).** The simulator doesn't generate scores. Late NFL tiebreak steps use points (conference and league points rankings, net points, net touchdowns). If a tie in a simulated world reaches one of those steps, the standings engine resolves it with a seeded draw and increments a counter. Standings built from real results always use real scores. If the counter shows that the draw decides a playoff spot or seed often enough to matter, add a score model.
 
-Dynamic evolution (D6) ships only if it meets those gates and is no worse than the frozen baseline on agreed proper scores. Otherwise the safe rollback is `eta=0` while preserving the architecture.
+## 6. Output
 
-## 7. Outcome and discrete score models
+```json
+{
+  "schema": "sim-output/1",
+  "engine_version": "0.3.0+a1b2c3d",
+  "rules_id": "nfl@2020",
+  "drift_id": "nfl-line-drift@v2",
+  "sims": 100000, "seed": "01JBQ7…", "runtime_ms": 6400,
+  "teams": {
+    "nfl-buf": {
+      "p_playoffs": 0.874, "p_division": 0.61,
+      "p_seed": [0.21, 0.18, 0.12, 0.10, 0.11, 0.09, 0.064],
+      "p_round": { "divisional": 0.61, "conference": 0.36, "super_bowl": 0.21, "champion": 0.12 },
+      "wins": { "mean": 11.4, "p10": 9, "p50": 11, "p90": 13, "hist": { "8": 0.03, "9": 0.08 } }
+    }
+  },
+  "diagnostics": { "tiebreak_draws": { "count": 412, "affected_playoff_spot": 37 }, "drift_clipped": 0, "warnings": [] }
+}
+```
 
-All per-game outputs are sampled from a valid probability simplex. Calibrated parameters are versioned inputs, not hard-coded planning constants.
+`p_seed` has one entry per seed (NFL: 1–7), and a team's `p_seed` sums to `p_playoffs`. Probabilities are decimals in [0, 1]. Rule IDs are illustrative until the standings package defines them.
 
-### MLB
+**Clinch.** Simulation output never sets clinch status. That comes from the clinch check ([features/14](features/14-clinch-magic-elimination.md)), which uses the simulation only as a screen.
 
-Sample the declared home-win probability as Bernoulli. Runs are not required by the initial standings registry; if a future procedure/feature requires them, it is a versioned model capability.
+## 7. Postseason (M4, needed by Wild Card weekend)
 
-### NBA
+Once the regular season ends, seeds are fixed. `postseason` then carries completed playoff games, and the engine builds the bracket from actual seeds and simulates only the unresolved games.
 
-Use a calibrated discrete joint score/margin distribution whose probability of positive home margin equals the anchored home-win probability within calibration tolerance. Scores are non-negative integers; ties are disallowed by the final-game procedure. The conversion from latent total/margin to integer scores, overtime handling, and any reconciliation step are versioned and fixture-tested. Accumulators consume the final integer scores only.
+NFL bracket: seeds 1–7 per conference, seed 1 gets a bye, Wild Card games are 2v7, 3v6 and 4v5. The bracket reseeds each round so the top remaining seed plays the lowest. The higher seed hosts every game except the neutral-site Super Bowl. Bracket formats are data in each league module, not hard-coded logic.
 
-### NFL W/L/T
+## 8. Performance targets
 
-The anchor contract is normalized to expected home win credit `m = P(home win) + 0.5·P(tie)`. A calibrated matchup/era tie model supplies `tau`, constrained by `0 ≤ tau ≤ 2·min(m, 1-m)`. Then:
+- NFL: 100k sims in under ~10 s on the production server, measured in M0.
+- If that misses, split sims across Node `worker_threads` (possible because draws are keyed per sim), or ship at a lower count with the count shown on the methodology page.
+- Browser (picker): 2k sims for a first result in well under a second on a mid-range phone, then refine toward 5k.
 
-- `P(home win) = m - tau/2`;
-- `P(tie) = tau`; and
-- `P(away win) = 1 - m - tau/2`.
+## 9. Known limitations at launch
 
-This preserves the anchored expected W/L/T credit and total probability; it does not carve a tie band silently out of win probability. A versioned discrete joint score model samples integer scores conditional on the chosen class, preserving win/tie/loss and supplying PF/PA for rules that need them. If SportsCrunch exposes a different anchor semantic, Phase 0 must define and validate the normalization to `m` rather than guessing.
+These are stated on the methodology page:
 
-### NHL six terminal classes
+- No player-level context beyond what the market prices into each game's probability.
+- Week 18 rest decisions are not modeled.
+- Drift doesn't react to simulated results until the M4 split.
+- Drift beyond 17 weeks is extrapolated.
+- Score-based tiebreak steps use a draw in simulated worlds.
 
-Use a hierarchical constrained model whose terminal classes are home/away winner × REG/OT/SO:
+## 10. Later extensions
 
-1. Sample winner from the anchored outright win probability.
-2. Conditional on winner/loser strengths and closeness, sample regulation versus extra time using calibrated logistic probabilities in `[0,1]`.
-3. If extra time, sample OT versus SO using a calibrated bounded probability.
-4. Sample a discrete regulation goal margin or apply the league-defined one-goal extra-time/SO standings treatment.
+- **Picker (M4):** `pins: [{ "game_id": "...", "outcome": "home" }]` forces outcomes. The caller derives the seed from snapshot ID + pins so everyone viewing a shared scenario gets the same numbers (D23/D35). Requires the result-coupled drift (§4).
+- **NHL (M5):** six outcome classes, home/away winner × regulation/OT/shootout. Sample the winner from the drifted probability first, then regulation vs extra time, then OT vs shootout, so the outright win probability is preserved. Standings need RW/ROW and the loser point. Goal differential steps need a goal model or the draw fallback.
+- **NBA (M5):** play-in bracket for seeds 7–10; point differential is the last tiebreak step (draw fallback at first).
+- **MLB (M6):** 162 games per team, so performance matters most here; series formats with byes for the top two division winners.
+- **Leverage (later):** while running, accumulate counts per near-term game outcome × team, giving "odds if X wins" for every upcoming game in one pass without storing per-sim results ([features/13](features/13-leverage-rooting.md)).
+- **Calibration (backlog):** backtest season odds against actual seasons; check drift and tie rate on 2026 results, reusing SportsCrunch's `benchmark:win-probabilities` and PoolCrunch's measurement tooling; consider per-sim talent uncertainty at the start of a season (D10).
 
-This produces six non-negative terminal-class probabilities summing to one and preserves the anchored outright winner probability by construction. Accumulators update points, RW, ROW, wins, GF/GA, and differential from the final discrete class/score under the pinned rule artifact. Calibration reports class-level reliability, not merely outright-win accuracy.
+## 11. Tests
 
-### Shared rounding/update rule
-
-Each league model owns a versioned deterministic transformation from sampled latent values to discrete outcome class and integer score/margin. It declares tie handling, overtime reconciliation, minimum/maximum/clamping behavior, and standings-stat updates. Property tests ensure rounding cannot flip the previously selected outcome class and that applying a result produces the same accumulator fields in PHP fixtures and TypeScript.
-
-## 8. Standings, qualification, and seeding
-
-Played games build one local baseline through the TypeScript evaluator; simulated results extend it. The evaluator loads the exact artifact in the bundle, not a package-local league/year ladder. At end of regular season it returns ordered standings, qualification paths, and seeds. It also emits primitive reach/fallback counters.
-
-The snapshot assembler compares the played-game baseline to authoritative SportsCrunch PHP output before the engine run can publish (doc 03). The simulation engine itself remains pure and does not decide whether a mismatch is publishable.
-
-## 9. Playoff simulation
-
-Simulation begins from `PostseasonState`. Known games/series remain fixed; only unresolved games/nodes are sampled. Hypothetical matchup pricing uses pinned ratings plus the world's accumulated deltas, declared venue/neutral flags, and bracket configuration. Series advance game by game and preserve the joint world.
-
-Bracket formats, series patterns, reseeding, qualification-to-node mapping, and home-site rules are versioned PlayoffOdds inputs and reverified preseason. Reusing regular-season HFA is an initial calibrated simplification, not an eternal invariant. MLB hypothetical pitcher effects and other unavailable player context are documented model limitations and evaluated through calibration.
-
-## 10. Browser execution and picker conditioning
-
-The browser receives a derived immutable payload from the same retained bundle, including:
-
-- stable team/game mappings and complete remaining-game start/neutral/anchor data;
-- ratings and dynamic state/parameters;
-- serialized locally rebuilt standings baseline;
-- bracket configuration and `PostseasonState`;
-- the exact pinned rule artifact/schema/checksum; and
-- engine-build/binary compatibility requirements.
-
-It does not receive merely “remaining games.” The worker rejects incompatibility and requests a fresh payload. Progressive 2k→5k refinement and direct conditioned server fallback are product contracts in features/12; performance targets require representative mobile benchmarks.
-
-## 11. Calibration and historical evaluation
-
-For every league/model version:
-
-- Fit only from training data available under the declared experiment design.
-- Evaluate on held-out seasons/cutoffs with proper scoring rules, calibration, class frequencies, and central/tail interval coverage.
-- Separate walk-forward artifacts from retrospective reconstruction and frozen-modern-model studies (D34).
-- Report input coverage, correction/anomaly policy, sample sizes, and confidence intervals.
-- Compare dynamic versus frozen-delta variants and the prior production model before promotion.
-- Version and retain all parameter bytes/checksums in each bundle.
-
-“Historical replay” means rules/standings reproduction; “forecast backtest” means predictive evaluation. They are not interchangeable.
-
-## 12. Performance targets and rollback
-
-Initial targets are: NFL 100k under 10 s, MLB under 60 s, NBA/NHL under 30 s on representative production hardware; client 2k first result under 200 ms and worker memory under 50 MB on a representative mid-range mobile profile. These are hypotheses until Phase 0/1 prototypes establish measured p50/p95, hardware, bundle, and browser conditions.
-
-CI tracks representative benchmarks and flags material regressions, but production gates use measured target hardware. Safe degradation options are reduced simulation count with visible uncertainty metadata, disabling dynamic updates, and server-only picker refinement. None may bypass rules parity, bundle retention, or publication validation.
-
-## 13. Acceptance tests
-
-- Canonical bundle validation plus offline exact-envelope replay.
-- PHP/TypeScript shared primitive/procedure/golden differential suite (doc 04).
-- Postseason-in-progress fixtures for each league: no completed game is resimulated; state advances correctly.
-- Probability-simplex, anchor-preservation, score-rounding, accumulator, and impossible-state properties.
-- Centered-delta and induced-drift measurement; proper-score/calibration/coverage reports.
-- Actual start/overlap fixtures proving overlapping games cannot inform one another and later non-overlapping games can.
-- Seed/stream extension: first 2k of a 5k run match the standalone 2k run within the exact replay envelope.
-- Build/rules/payload incompatibility fails closed.
-- Representative server/mobile benchmarks with recorded environments.
-
-Phase 1 cannot exit on runtime alone: MLB must pass end-to-end pinned bundle, parity, replay, calibration, postseason-state, and aggregate-invariant gates; NFL follows with its W/L/T and dependency-heavy standings fixtures.
+- **RNG:** keyed draws are stable across sim counts and thread splits. Changing one game's pin changes no other game's draws.
+- **Drift:** across many sims, each team's walk variance at each horizon matches `Σ team_increment_var[1..h]` within tolerance, and two games of the same team share the walk. Golden values from PoolCrunch's generator on a fixed seed are not expected to match bit-for-bit (different RNG), but the variance curve must.
+- **Sampling:** over many draws, outcome frequencies match §5 within tolerance; probabilities always sum to 1.
+- **Determinism:** same input + seed gives byte-identical output.
+- **All games final:** every team's seed has probability exactly 1 and matches the standings engine's deterministic result.
+- **Invariants:** each sim assigns each seed exactly once per conference; `sum(p_seed) == p_playoffs`; round probabilities never increase in later rounds.
+- **Smoke:** run on the live 2026 NFL season and sanity-check against public models (ESPN FPI, NYT). They are a sanity check, not an oracle.

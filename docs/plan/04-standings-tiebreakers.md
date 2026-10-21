@@ -1,159 +1,134 @@
-# 04 — Rules, Standings, Qualification, and Seeding Architecture
+# 04 — Standings Engine (one implementation, used everywhere)
 
-**Status: DRAFT v3 (2026-07-22) — confirmed ownership model D30; schema and artifacts are Phase 0 deliverables.**
+**Status: DRAFT v3 (2026-10-21).** Per D44: rules are written once in TypeScript, used by the simulator and the browser, and used by SportsCrunch through a PHP wrapper. Rules come from official league publications, versioned by era (D15). Nothing from OLD_playoffodds is used.
 
-This document specifies how immutable SportsCrunch rules are selected, transported, interpreted, compared, and used locally. It does not duplicate league procedures; canonical ladders, citations, and era boundaries live in SportsCrunch artifacts.
+## 1. What it does
 
-## 1. Scope
+Given a league, a season, teams with their alignment for that season, and game results, the engine returns:
 
-The initial shared rule registry covers:
+- records for each team (overall, division, conference, and anything else the rules use);
+- ordering within each division and conference;
+- division winners, playoff qualifiers and seeds;
+- optionally, a trace explaining each tiebreak ("BUF over MIA: step 2, division record 4-1 vs 3-2").
 
-- standings record/points calculation;
-- ordering and tiebreak procedures, including multi-team restart/reduction behavior;
-- qualification paths; and
-- seed assignment.
+Its entry points all share the same rules:
 
-Playoff bracket formats, playoff probability models, postseason exact-search algorithms, and draft/lottery rules remain PlayoffOdds-owned initially. Expansion requires a versioned schema/contract decision, shared fixtures, and a compatibility plan.
+```ts
+// Deterministic: real results (SportsCrunch, site "if season ended" standings, fixtures).
+computeStandings(input: StandingsInput, opts?: { trace?: boolean }): StandingsOutput
 
-The rules layer supports two distinct evaluations:
+// Fast path for simulations: precompute once per run, then evaluate many worlds.
+const evaluator = createSimEvaluator(input);
+const world = evaluator.newWorld();      // starts from the played-games baseline
+world.apply(gameId, outcome);            // simulated results
+world.resolve(rng): SeedResult;          // division winners + seeds for this world
 
-- **Simulation evaluation:** apply a complete simulated world, resolve qualification/seeding under the pinned artifact, and return compact results. It is performance-sensitive and can use a rules-authorized seeded terminal draw only where the league procedure calls for one or the simulation contract explicitly permits a disclosed fallback.
-- **Authoritative/display evaluation:** apply actual results through exact `as_of`, preserve unresolved ties, and return ordered/shared positions plus an explanation trace and warnings. It never invents or randomly breaks an unresolved in-season display tie.
+// Clinch/elimination (D50): clinched / eliminated / alive per team and target, never wrong.
+computeClinch(input: StandingsInput, opts?: { targets?: Target[]; screen?: SimScreen }): ClinchOutput
+```
 
-Proof-safe clinch/elimination search consumes the same evaluator but is a separate Phase 5E subsystem (D33 and features/14).
+The clinch module lives in this package because it reuses the same rules and is needed by both the site and SportsCrunch. See §10 and [features/14](features/14-clinch-magic-elimination.md).
 
-## 2. Ownership and single source of truth
+## 2. Package layout
 
-SportsCrunch owns the canonical JSON Schema, immutable artifacts, citations/docs, fixtures, selection/exceptions, PHP interpreter, and authoritative standings service. PlayoffOdds owns one generic TypeScript interpreter and local accumulators. Rule definitions are not copied into TypeScript source or a PlayoffOdds-owned registry.
+```text
+packages/standings/
+  src/core/          records, head-to-head, common opponents, SOV/SOS, multi-team reduction/restart, ranking helpers
+  src/leagues/nfl/   era modules (e.g. 2020.ts) + index.ts (season → era selection)
+  rules/nfl/         2020.md — cited summary of the official procedure: source URL, retrieval date, what changed vs the prior era
+  fixtures/nfl/      small hand-built tie scenarios + golden seasons (inputs and official results)
+  src/cli.ts         standings CLI (§8)
+```
 
-“Authored once, interpreted twice” replaces the earlier “standings logic written once” wording:
+## 3. Rules as code, versioned by era
 
-1. An era rule is authored as one canonical artifact in SportsCrunch.
-2. PHP and TypeScript execute the same primitive/procedure graph.
-3. Shared fixtures and differential tests prevent interpreter drift.
-4. Snapshot publication pins the payload and blocks on material output disagreement.
+Each era module is TypeScript composed from shared primitives. It has an ID, a season range, the playoff format and its tiebreak sequences:
 
-## 3. Immutable rule artifact contract
+```ts
+export const nfl2020: RulesModule = {
+  id: 'nfl@2020',
+  league: 'nfl',
+  seasons: { from: 2020, to: null },          // open-ended until the league changes the procedure
+  source: 'rules/nfl/2020.md',
+  format: { groups: ['AFC', 'NFC'], divisionWinners: 4, wildCards: 3, byes: 1 },
+  division: { twoClub: [headToHead, divisionPct, commonGamesPct(), conferencePct, strengthOfVictory, strengthOfSchedule, /* … */ coinToss],
+              multiClub: [/* … */], onReduceToTwo: 'restart-two-club' },
+  wildCard: { /* … */ },
+};
+```
 
-Every artifact contains or references immutable, checksum-bound values for:
+- `selectRules(league, season)` returns exactly one module. Zero or more than one match is an error.
+- **Adding an era** means a new module, `.md` and fixtures. Changing an era's behavior after snapshots have used it means bumping the package version. Snapshots record both `rules_id` and `engine_version`.
+- **Missing data is explicit.** If a step needs data we don't have (for example net touchdowns, which SportsCrunch doesn't record), the step reports itself as unavailable. It is never silently skipped. See §5.
 
-| Area | Required fields/semantics |
-|---|---|
-| Identity | Stable `ruleset_id`, league, semantic artifact version, creation time, payload checksum. |
-| Applicability | Season/era range and explicit exception selectors; ambiguous or overlapping selection is invalid. |
-| Schema | Schema ID/version/checksum, canonicalization algorithm, minimum compatible interpreter capability/version. |
-| Standings | Primary record/points calculation and every accumulator field it requires. |
-| Procedures | Ordered primitives, parameters, grouping, multi-team split/restart/reduction behavior, qualification paths, and seed assignment. |
-| Resolution | Rules-authorized terminal behavior, unresolved policy by mode, and whether non-standard season behavior applies. |
-| Proof metadata | Declared outcome dependencies for each primitive: direct game, opponent record, defeated-opponent record, score/margin, cross-group eligibility, postseason result, or other named dependency. |
-| Provenance | Human-readable document ID/URL, official citations/retrieval dates, adjacent-version change note. |
-| Verification | Fixture-set ID/checksum and manifest of primitives/procedures/edge cases exercised. |
+## 4. NFL (first league)
 
-A conceptual family is `rules/nfl/standings-2002-v1.json`, `.md`, and `fixtures.json`; filenames are illustrative. APIs resolve selection to a concrete immutable artifact. A correction creates `…-v2` with a new checksum and change note.
+The summary below is from NFL.com's tie-breaking procedures. **Verify it against the current official text and cite it in `rules/nfl/2020.md` before encoding.**
 
-## 4. Generic interpreter contract
+- **Division, two clubs:** head-to-head; division record; common games; conference record; strength of victory; strength of schedule; combined ranking in points scored and allowed (conference, then all teams); net points in common games; net points in all games; net touchdowns; coin toss.
+- **Division, three or more clubs:** same sequence using head-to-head among all tied clubs. When the tie is reduced to two clubs, restart at step 1 of the two-club procedure.
+- **Wild card:**
+  - Clubs tied from the same division are first broken with the division procedure, keeping only the highest-ranked club from each division.
+  - Two clubs: head-to-head if applicable; conference record; common games (minimum four); strength of victory; strength of schedule; points-based steps; coin toss.
+  - Three or more clubs: head-to-head *sweep* only; then the same sequence; restart when reduced.
+  - Repeat the whole procedure to find each subsequent wild card.
+- **Seeding:** division winners are seeds 1–4 (ties among them use the wild-card procedure), wild cards are 5–7.
+- **Ties count as half a win and half a loss** in percentages.
 
-Both interpreters implement the same observable operations:
+**Edge cases for fixtures:**
 
-- Create an accumulator state from season teams, schedule metadata, and the pinned artifact.
-- Apply one normalized final game result using explicit league outcome/rounding rules.
-- Produce standings in `official` or `if_season_ended` mode.
-- Produce qualification paths and seeds when meaningful.
-- Emit a structured explanation trace in non-hot paths.
-- Expose dependency metadata used by proof-safe search.
-- Reject unknown primitives, unsupported schema/capability versions, invalid procedure graphs, and incomplete required inputs.
+- 2022: the Bills–Bengals game was canceled, so standings are by win percentage with unequal games played.
+- Three-team division ties.
+- A wild-card tie involving two clubs from the same division.
+- Common-games minimum not met.
+- Restart after reduction.
 
-Interpreter behavior is generic. Adding a new era normally adds an artifact and fixtures, not league/year branches. A genuinely new primitive changes the schema/interpreter capability version and requires compatibility tests before selection can return it.
+## 5. Unresolved ties, draws and missing data
 
-## 5. Primitive and procedure families
+| Situation | Deterministic (`computeStandings`) | Simulation (`resolve(rng)`) |
+|---|---|---|
+| Tie reaches coin toss | Return the clubs as **tied/unresolved** with a flag; the site shows "tied" | Seeded random draw (this is what the league would do) |
+| Step needs simulated scores (points rankings, net points) | Uses real scores | Seeded draw; count it (D47) |
+| Step needs data we don't have (net touchdowns) | Flag unresolved | Seeded draw; count it |
 
-The schema must be expressive enough for the currently supported official procedures without embedding executable code. Expected primitive families include:
+Counts are reported in the simulation diagnostics ([01](01-simulation-engine.md) §5). If score-based draws decide playoff spots or seeds often enough to matter, add a score model.
 
-- direct and pooled head-to-head records/points, sweep tests, odd-game exclusions;
-- division/conference/league/common-opponent records;
-- strength of victory/schedule and record-vs-eligible-set dependencies;
-- regulation/extra-time wins, points percentage, goal/run/point differential and totals;
-- ordered schedule-window/backward-walk comparisons;
-- division-winner precedence, group reduction, quarantine, and seed-path precedence; and
-- rules-authorized draw/coin procedure.
+## 6. Validation
 
-Expected procedural controls include two-team versus multi-team ladders, partial split, subgroup recursion, restart at a declared step, one-team-advances/repool, original-order preservation, and cross-ladder application. Each artifact declares needed accumulators and dependencies so unused state is not maintained.
+Correctness is checked against official results, not against a second implementation (D44):
 
-This list is a schema design input, not the rule definition for any league or era.
+1. **Scenario fixtures:** small hand-built cases for every primitive and every procedure path (two-club, multi-club, restart, wild-card division pruning, common-games minimum, ties in percentages).
+2. **Golden seasons:** NFL 2020–2025 final division winners and seeds 1–7 for both conferences, from official sources, with the source URL recorded. Inputs come from SportsCrunch's historical games, exported once and committed as fixture JSON. The engine must reproduce every season.
+3. **Live check:** each snapshot compares "if season ended" seeds with the official standings crawl when available ([03](03-sportscrunch-integration.md) §3). A mismatch is logged as a warning for investigation, not a publish blocker. Either side can be wrong mid-season.
+4. **Simulation consistency:** with every game final, `resolve` must equal `computeStandings` with probability 1.
 
-## 6. Accumulator and normalized result contract
+## 7. Performance (simulation path)
 
-The local baseline is built only from normalized snapshot inputs. Per-artifact accumulator requirements may include:
+- Precompute once per run: division/conference membership, schedule-derived sets (common opponents, each team's opponents for SOS), and baseline records from final games.
+- Per world, apply simulated results to compact arrays and only run tiebreakers for clubs actually tied at a boundary that matters.
+- Target: standings plus seeding well inside the NFL budget of 100k worlds in about 10 s total ([01](01-simulation-engine.md) §7). Measure in M0.
 
-- W/L/T or W/L/OTL, points, regulation/extra-time wins;
-- division/conference/league splits;
-- pairwise head-to-head state;
-- opponent/result graphs for SOV/SOS-like dependencies;
-- scored/allowed totals and league-defined differential treatment;
-- ordered game histories for schedule-window procedures; and
-- static membership, schedule, common-opponent, eligibility, and exception maps.
+## 8. CLI (for SportsCrunch and debugging)
 
-Schedule-derived state is precomputed once per snapshot. Played results establish the immutable baseline once; each simulation world extends a copy/incremental representation. Raw games are not reparsed inside every world.
+`node standings.mjs standings < input.json > output.json`, and `node standings.mjs clinch < input.json > output.json` for clinch statuses.
 
-`GameResult` normalization is explicit and fixture-tested: actual start/finality, participating season-team IDs, discrete scores, W/L/T/outcome class, regulation/OT/SO end type when relevant, neutral/site metadata, and correction lineage. Missing a required field is a validation error, not a guessed default.
+- **Input `standings-input/1`:** `league`, `season`, teams with alignment, games with status and scores, and optional `as_of` cutoffs (one or many).
+- **Output `standings-output/1`:** `engine_version`, `rules_id`, and for each cutoff the per-team records, ranks, seeds, unresolved flags and an optional trace.
 
-## 7. Modes and unresolved ties
+The CLI is bundled into one dependency-free file so SportsCrunch can run it with plain `node` (O9 covers how it gets there).
 
-`official` and `if_season_ended` are explicit inputs, never inferred from the route.
+## 9. Other leagues (M5, M6)
 
-- `official`: reproduce the league-recognized table/status at exact `as_of`. During the season, tied clubs may share an unresolved display position.
-- `if_season_ended`: apply the selected final qualification/seeding procedures to games completed by `as_of`. It may assign seeds when the official live table does not; it may still return unresolved when required inputs/procedures cannot determine a unique order.
-- Simulation: evaluate a complete hypothetical state. A seeded random terminal is allowed only when declared by the artifact or by a separately disclosed simulation-only fallback. Reach counts for fallbacks are retained; an unexpected reach rate fails validation.
+Each league gets its own era modules, `.md` sources and golden seasons before launch. Known structural needs:
 
-Public displays carry mode and unresolved/degraded warnings. No output calls a random or unsupported resolution “official.”
+- **NBA:** play-in for seeds 7–10 (the bracket is in the simulator; the standings engine supplies seeds 1–10). The NBA Cup championship game doesn't count in standings. Point differential is a late tiebreak step.
+- **NHL:** points with the loser point, regulation wins (RW) and regulation-plus-OT wins (ROW), and division-based qualification plus two wild cards per conference. Requires REG/OT/SO end types from SportsCrunch. Goal-based steps need real goals (deterministic) or a draw (simulation).
+- **MLB:** since 2022 the format is 6 teams per league with byes for the top two division winners, and ties are broken by formula with no tiebreaker games. Uses a 162-game schedule.
 
-## 8. Rule selection and exceptional seasons
+## 10. Clinch and elimination
 
-Selection is SportsCrunch-owned and deterministic over league, season, and explicit modeled exceptions. The selection response explains which selector matched. Requirements:
+`computeClinch` answers, for each team and target (playoff spot, division, top seed), whether any legal way the remaining games could go would change the outcome. It returns `clinched`, `eliminated` or `alive`, plus "controls its own destiny".
 
-- exactly one artifact matches; zero or multiple matches are errors;
-- non-standard seasons are explicit artifacts/overlays or explicitly unsupported, never silently excluded from verification while still served;
-- backfill pins the artifact selected for that historical season, not today's artifact;
-- a later correction selects a new immutable version only for newly assembled snapshots; and
-- PlayoffOdds archives the selected response and payload, not merely an ID.
-
-## 9. PHP/TypeScript conformance
-
-Required layers:
-
-1. **Schema tests:** valid/invalid artifact corpus, canonical byte/checksum parity, capability negotiation.
-2. **Primitive fixtures:** every primitive, parameter variant, pass/split/resolve outcome, and numeric normalization edge.
-3. **Procedure fixtures:** multi-team restart/reduction/recursion, unresolved modes, qualification paths, seed assignment, and explicitly modeled exceptions.
-4. **Golden seasons:** curated official final standings/brackets across supported eras, including non-standard cases when the product serves them.
-5. **Differential tests:** PHP and TypeScript receive identical artifact/input bytes and must agree on all material fields.
-6. **Snapshot baseline test:** authoritative SportsCrunch response and PlayoffOdds rebuilt baseline agree before publication.
-
-Material parity is exact for IDs, ruleset/schema/checksums, records, qualification paths, seeds, resolved/unresolved grouping, and discrete stats. Any numeric tolerance is field-specific and documented. Trace text may differ; trace step IDs and decisions should agree where emitted.
-
-Every primitive/procedure used by an artifact must be named in its fixture coverage manifest. “Golden seasons pass” alone is insufficient because real seasons rarely reach deep rules.
-
-## 10. Proof dependency graph
-
-Each rule step declares all future outcomes/statistics capable of changing it. The Phase 5E proof subsystem composes these declarations into a dependency graph before choosing DP, SAT, MILP, branch-and-bound, or another proven method.
-
-For example, an opponent-record dependency can make games between two third parties relevant; record-bound pruning that ignores that edge is unsound. Score/margin and multi-valued NHL outcome dependencies are likewise explicit. If the graph includes an unsupported dependency, the proof API returns `unknown/not_proven` and cites it.
-
-The rules evaluator supplies facts and deterministic evaluation; it does not itself claim that a bounded search proved a universal statement.
-
-## 11. Performance and observability
-
-Targets—not promises until benchmarked—include average end-of-world standings/seed evaluation below 50 μs for an NFL representative bundle and acceptable total league budgets in doc 01. Benchmarks run on target server hardware and representative mobile browser workers.
-
-Record per snapshot/batch: evaluator/schema/ruleset IDs, evaluation counts/duration, primitive reach/split/resolve counts, fallback/unresolved counts, parity outcome, and unsupported dependency counts. Published transparency may summarize these without exposing internal or licensed source data.
-
-## 12. Phase 0 deliverables and exit gate
-
-- Canonical schema/canonicalization and compatibility policy.
-- Current MLB and NFL cited artifacts plus shared fixture manifests.
-- SportsCrunch selection and standings endpoints in both modes.
-- PHP and TypeScript generic evaluators passing the full shared/differential suite.
-- At least one golden season and curated deep-step/edge fixtures per MLB and NFL before its Phase 1 proof; the larger historical corpus grows before historical claims.
-- Failure tests for unknown primitive, bad checksum, ambiguous selection, incomplete result, unresolved tie, and material interpreter disagreement.
-- Documented process for preseason source review and immutable corrections.
-
-Phase 0 is blocked if material parity is not zero-diff or if a current-season artifact lacks source/fixture coverage. NBA/NHL artifacts may follow in their gated onboarding phases, but their schema needs must be represented in the Phase 0 design corpus so the first schema is not MLB/NFL-only by accident.
+- **Never wrong, sometimes late.** When a record tie would need a tiebreaker the search doesn't evaluate exactly, the check assumes the worst for the team when proving a clinch and the best when proving elimination. If the league announces first, the official marker fills the gap.
+- **Screened by simulation.** Teams whose simulated odds include both making and missing a target are alive without a search; only teams at or near 0% or 100% are checked.
+- **Full design:** solver choice, validation, scenarios and magic numbers are in [features/14](features/14-clinch-magic-elimination.md).
