@@ -6,7 +6,7 @@ Users pick winners of upcoming games and see the playoff odds recalculate as pro
 
 ## 1. How it works
 
-1. The page loads the current snapshot's `SimInput`, the same gzipped file the server simulated ([02](../02-simulation-outputs.md) §3). It is served at a cacheable URL keyed by snapshot ID. The file holds team IDs, games, win probabilities and ratings, and nothing secret.
+1. The page loads the current snapshot's `SimInput`, the same gzipped file the server simulated ([02](../02-simulation-outputs.md) §3). It is served at a cacheable URL keyed by snapshot ID. The file holds team IDs, games, win probabilities and the matchup matrix, and nothing secret.
 2. A Web Worker runs `@playoffodds/engine` with the user's picks as forced outcomes (`pins`, [01](../01-simulation-engine.md) §9).
 3. It shows a first result after about 2k sims, then keeps refining in the background (to 5k or 10k), updating the numbers quietly. The details panel shows the simulation count.
 4. The baseline column shows current odds from the server snapshot, so users see the change each pick makes.

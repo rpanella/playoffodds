@@ -45,7 +45,7 @@ Store probabilities as decimals in [0, 1], for example `DECIMAL(7,6)`. Later fea
 ## 3. Snapshot job
 
 1. **Trigger.** Runs on a daily schedule at the league's snapshot time and after game finals, debounced so a slate of games produces one run once the last game in a window goes final. Also runs for backfill or manually from an artisan command.
-2. **Sync.** Refresh the mirror for the league-season from SportsCrunch (games, scores, probabilities, ratings).
+2. **Sync.** Refresh the mirror for the league-season from SportsCrunch (games, scores, probabilities, matchup odds).
 3. **Build input.** Build `SimInput` ([01](01-simulation-engine.md) §2) from local tables with the cutoff at `as_of`.
 4. **Skip if nothing changed.** If the input's sha256 and the engine version match the current snapshot, stop without creating a snapshot.
 5. **Store input.** Gzip the input and write it to `snapshots/{league}/{season}/{snapshot_id}.json.gz` on the artifact disk (S3 in production), then record the sha256.
@@ -66,7 +66,7 @@ Jobs run on the Laravel queue (Horizon/Redis), one job at a time per league-seas
 - Movement is the change between current and the daily point 1 day or 7 days earlier, shown with both endpoints ("62% → 34%").
 - **Backfill (M1).** For each day of the 2026 NFL season before the pipeline went live, build the input with `as_of` at that day's snapshot time:
   - games final before `as_of` count as played;
-  - remaining-game probabilities come from `GET /historical-odds?at=` and ratings from the ratings endpoint at the same instant (or the anchor fit);
+  - remaining-game probabilities come from `GET /historical-odds?at=` and matchup odds from `GET /matchup-odds?at=` at the same instant (or the anchor fit);
   - these snapshots are `origin = reconstructed`.
   - Note that SportsCrunch fixed stale NFL look-ahead lines on 2026-09-22 ([03](03-sportscrunch-integration.md) §6), so reconstructions of earlier dates may differ from what was served then. The label covers this.
 - Days with no games still get a daily point, but only if inputs changed (for example, lines moved).

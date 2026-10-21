@@ -8,7 +8,7 @@
 |---|---|
 | Teams, seasons, schedules, scores, game status | Simulation engine and snapshots |
 | Per-game home win probabilities (market consensus or its predictor) | The standings engine package `@playoffodds/standings` (D44) |
-| Team ratings (predictor internals) | Local mirror, publishing, website, API/MCP |
+| Matchup odds for any pairing, from its predictor (to add) | Local mirror, publishing, website, API/MCP |
 | Crawled official standings and clinch markers (to add) | — |
 | Calls the standings engine through a PHP wrapper when it needs standings | — |
 
@@ -34,20 +34,26 @@ Verify in M0 that `home_win_probability` on the games endpoint and `historical-o
 
 | # | Addition | Needed for | When |
 |---|---|---|---|
-| 1 | **Ratings endpoint:** `GET /seasons/{season}/ratings?at=` (§4) | Playoff matchups and championship odds | M1 (launch). Fallback: fit from anchors |
+| 1 | **Matchup odds endpoint:** `GET /seasons/{season}/matchup-odds?at=` (§4) | Playoff games and championship odds | M1 (launch). Fallback: fit from anchors |
 | 2 | **Official standings crawl:** ESPN standings including clinch/elimination markers, stored per season and exposed via `GET /seasons/{season}/standings/official` | Live cross-check for our standings (D44) and our computed clinch statuses (D50); fills the gap when the league announces a clinch before our conservative check proves it | M1–M2; launch can proceed without it |
 | 3 | **PHP standings wrapper** around the shared CLI (§7) | SportsCrunch-side standings and seeds | Any time after launch, when SportsCrunch needs it |
 | 4 | **NHL end type** (regulation/OT/shootout) on games | NHL standings (loser point, RW/ROW) | Before M5 |
 | 5 | **NBA Cup final flag:** the NBA Cup championship game does not count in the standings | NBA standings | Before M5 |
 | 6 | Re-check MLB inputs (pitcher-aware anchors already exist) | MLB | Before M6 |
 
-## 4. Ratings endpoint (D47)
+## 4. Matchup odds endpoint (D52)
 
-SportsCrunch's predictor blends `RecentOddsPredictor` with `SeasonWinsPredictor` (separate sigmoid scales, with a preseason blend weight that decays), and MLB uses `RecentOddsWithPitcherPredictor`. The endpoint should expose whatever reproduces the predictor's probability for an arbitrary matchup:
+Playoff games aren't on the schedule, so they have no line and no game probability. SportsCrunch adds `GET /seasons/{season}/matchup-odds?at=`, which runs its existing predictor on every pairing:
 
-- **Preferred:** one effective rating per team on a logit scale, after blending, plus HFA in the same units, such that `P(home) = sigmoid(r_home − r_away + hfa)` (HFA omitted at neutral sites). Also return `model` and `as_of`.
-- **If the blend can't be expressed that way:** return an N×N home-win probability matrix plus a neutral-site matrix (32×32 for NFL), computed by the predictor.
-- **Fallback in PlayoffOdds until this exists:** least-squares fit of `logit(p_home) = r_home − r_away + hfa` over the remaining scheduled games. This is close to exact for predictor-generated games and reasonable for market-priced ones. Record `ratings.source = "fit"` in the input.
+- **Home matrix:** for every ordered pair of teams, the probability that the home team wins if they met at `at`. Each pair appears both ways, so this covers home and away. For the NFL that is 32 × 31 = 992 entries.
+- **Neutral matrix:** the same pairs at a neutral site, from the predictor's neutral-site path (confirmed available).
+- **Metadata:** `model` and `as_of`. `?at=` serves backfill the same way `historical-odds?at=` does.
+- **Consistency check:** for scheduled games without a market line, the matrix entry should equal the game's `home_win_probability`. Pin this in a consumer test.
+- **MLB:** playoff starters aren't known, so the matrix is pitcher-neutral. Re-check in M6.
+
+**Why a matrix and not ratings:** the predictor blends `RecentOddsPredictor` with `SeasonWinsPredictor` (separate sigmoid scales, with a preseason blend weight that decays), and MLB adds starting pitchers. One rating per team can't reproduce that blend, but running the predictor on every pairing is easy. If SportsCrunch is later rebuilt around one underlying rating per team, it can produce the same matrix from those ratings, and PlayoffOdds won't need to change.
+
+**Fallback until the endpoint exists** (the M0 spike, and backfill if that runs first): fit `logit(p_home) = r_home − r_away + hfa` to the remaining scheduled games and build the matrix from the fit. Record `matchups.source = "fit"` in the input.
 
 ## 5. Sync and triggers
 

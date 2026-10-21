@@ -19,7 +19,7 @@
 
 **PlayoffOdds**
 
-- Set up JavaScript workspaces with `packages/standings`, `packages/engine` and `packages/cli`, using TypeScript and Vitest. The Laravel app can wait for M1.
+- In this repo, set up JavaScript workspaces with `packages/standings`, `packages/engine` and `packages/cli`, using TypeScript and Vitest. The Laravel app joins the same repo in M1.
 - **Standings:**
   - Write `rules/nfl/2020.md` from the official NFL procedure, with citation and retrieval date.
   - Implement the `nfl@2020` module, scenario fixtures, and golden fixtures for 2020–2025 (games exported from SportsCrunch, official seeds with sources).
@@ -29,11 +29,11 @@
   - Port the drift team walk from PoolCrunch's `driftgen.py`, with parameters copied from `line_drift_generator_v2.json`.
   - The measured tie rate.
 - **CLI:** `simulate` and `standings` commands, bundled to single files.
-- **Spike script:** a throwaway script that pulls the live 2026 NFL season from the SportsCrunch API, builds `SimInput` (ratings via the anchor fit if the endpoint isn't ready), runs 100k sims and prints a table.
+- **Spike script:** a throwaway script that pulls the live 2026 NFL season from the SportsCrunch API, builds `SimInput` (matchup odds via the anchor fit if the endpoint isn't ready), runs 100k sims and prints a table.
 
 **SportsCrunch**
 
-- Start the ratings endpoint ([03](03-sportscrunch-integration.md) §4).
+- Start the matchup odds endpoint ([03](03-sportscrunch-integration.md) §4).
 - Confirm that `is_projected` (or equivalent) is available for current games.
 
 **Done when:**
@@ -52,7 +52,7 @@
 - Triggers: daily schedule, webhook or poll after game finals (debounced), and an artisan command for manual runs.
 - Backfill the 2026 NFL season from Week 1 as `reconstructed` daily snapshots.
 - A minimal internal view or artisan command to list snapshots, their diagnostics and failures.
-- **SportsCrunch:** ship the ratings endpoint, then start the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
+- **SportsCrunch:** ship the matchup odds endpoint, then start the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
 
 **Done when:**
 

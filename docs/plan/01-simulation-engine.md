@@ -37,33 +37,35 @@ Built by Laravel from its local mirror of SportsCrunch data ([02](02-simulation-
       "home": "nfl-buf", "away": "nfl-mia", "neutral": false,
       "status": "scheduled", "p_home": 0.71, "p_source": "market" }
   ],
-  "ratings": { "scale": "logit", "hfa": 0.20, "source": "sportscrunch", "teams": { "nfl-buf": 0.62, "nfl-mia": -0.15 } },
+  "matchups": { "source": "sportscrunch", "teams": ["nfl-ari", "nfl-atl", …],
+                "home": [[null, 0.58, …], [0.49, null, …], …],
+                "neutral": [[null, 0.54, …], [0.46, null, …], …] },
   "postseason": { "state": "not_started" },
   "params": { "sims": 100000, "seed": "01JBQ7…", "tie_rate": 0.00373, "drift": "nfl-line-drift@v2" }
 }
 ```
 
 - `p_home` is SportsCrunch's home win probability for that game. `p_source` is `market` or `projected` (from `is_projected`).
-- `ratings` price games that are not on the schedule, meaning playoff matchups (D47, [03](03-sportscrunch-integration.md) §4).
+- `matchups` prices games that are not on the schedule, meaning playoff games (D52, [03](03-sportscrunch-integration.md) §4). `home[i][j]` is SportsCrunch's probability that `teams[i]` beats `teams[j]` at home; `neutral` is for neutral sites such as the Super Bowl.
 - `params.drift` names a drift parameter file bundled with the engine (§4). The standings package picks the rule era from `league` + `season`. The engine records the drift and rules IDs in its output.
-- Validation rejects unknown team IDs, duplicate game IDs, final games without scores, scheduled games without `p_home`, and probabilities outside (0, 1).
+- Validation rejects unknown team IDs, duplicate game IDs, final games without scores, scheduled games without `p_home`, a matchup matrix that doesn't cover every team, and probabilities outside (0, 1).
 
 ## 3. One simulated season
 
 1. **Baseline.** Build standings from final games once per run (via the standings package). Each sim starts from a copy.
-2. **Draw the drift.** Draw this sim's per-team rating walks (§4).
+2. **Draw the drift.** Draw this sim's per-team walks (§4).
 3. **Remaining regular season.** Walk unplayed games in rounds: NFL by week; NBA, NHL and MLB by league-local date.
    - Each game's probability is `sigmoid(logit(p_home) + W_home(h) − W_away(h))`, where `h` is the number of weeks between `current_week` and the game's week and `W_t(h)` is team *t*'s walk at that horizon.
    - Sample the outcome (§5) and add it to the standings.
 4. **Seeding.** Call the standings engine's fast path to get division winners, playoff teams and seeds for this world.
 5. **Playoffs.** Simulate the bracket from those seeds, or from the actual postseason state once it has started (§7).
-   - Matchups use `sigmoid(r_home − r_away + hfa + W_home(h) − W_away(h))`, with no HFA at neutral sites. `h` is the weeks from now to that playoff round.
+   - A game with home team `a` and away team `b` uses `sigmoid(logit(home[a][b]) + W_a(h) − W_b(h))`, or the `neutral` entry at neutral sites. `h` is the weeks from now to that playoff round. Playoff games get the same drift as regular-season games.
    - Playoff games cannot tie.
 6. **Record** each team's wins/losses/ties, playoff qualification, division title, seed, furthest round and championship.
 
 ## 4. Drift: teams improving and declining (D51)
 
-Game odds are today's best estimate, but teams change over a season: injuries, form, news. Each simulated season therefore gives every team its own random rating path, sized from **measured historical line movement**.
+Game odds are today's best estimate, but teams change over a season: injuries, form, news. Each simulated season therefore gives every team its own random path on the log-odds scale, sized from **measured historical line movement**.
 
 **Source.** PoolCrunch's fitted NFL generator, `poolcrunch/ml/simulator/params/line_drift_generator_v2.json`. It was fitted on 2014–2025 weekly boards from the SportsCrunch feed and validated against the market's own measured movement. Copy the relevant parameters into `packages/engine/params/nfl-line-drift-v2.json`, keeping the provenance (source path, fit date, measurement digest).
 
@@ -83,8 +85,8 @@ All of a team's games read the same path, which is what makes a team's results m
 **Beyond the fitted range.** The fit covers 17 weeks. Playoff rounds early in the season can be further out; hold the last increment's variance constant beyond 17 and note it as a limitation.
 
 **Before the picker (M4): add result coupling.** As ported, the walk is drawn up front and doesn't react to simulated results. Pinning the Bills to win next week wouldn't make them stronger afterwards, though real lines move after wins.
-- Measure from line history how much of a team's weekly rating revision is explained by its result surprise (`actual − expected`).
-- Add that part as an in-sim update after each round: `rating += K × (actual − expected)`.
+- Measure from line history how much of a team's weekly line movement is explained by its result surprise (`actual − expected`).
+- Add that part as an in-sim update to the team's walk after each round: `W_t += K × (actual − expected)`.
 - Shrink the walk so total movement still matches the measured curve.
 
 **Other leagues.** Re-run PoolCrunch's measurement (`driftmodel.py`, `driftgen.fit`) on NBA, NHL and MLB line history before M5 and M6. Use calendar days or weeks as the horizon unit, as fits each league.

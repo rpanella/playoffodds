@@ -36,7 +36,7 @@ The competitive feature catalog is [playoff-projections-feature-and-technical-re
 ## 3. Architecture
 
 ```text
-SportsCrunch API  (teams, games + scores, per-game probabilities, ratings, official standings)
+SportsCrunch API  (teams, games + scores, per-game probabilities, matchup odds, official standings)
         │  daily schedule + after game finals
         ▼
 Laravel app (DB `podds`)
@@ -53,7 +53,7 @@ Inertia + Vue site · later: JSON API, MCP, browser picker (same engine in a Web
 SportsCrunch (PHP) ── thin wrapper ──► the same @playoffodds/standings CLI   (D44)
 ```
 
-- **SportsCrunch** is the data source: schedules, scores, sportsbook-anchored win probabilities for every remaining game, team ratings, and crawled official standings. See [03](03-sportscrunch-integration.md).
+- **SportsCrunch** is the data source: schedules, scores, sportsbook-anchored win probabilities for every remaining game, a matchup-odds matrix for playoff games, and crawled official standings. See [03](03-sportscrunch-integration.md).
 - **The standings engine** is one TypeScript package used by the simulator, the browser and, through a PHP wrapper, SportsCrunch. It also computes clinch and elimination. See [04](04-standings-tiebreakers.md) and [features/14](features/14-clinch-magic-elimination.md).
 - **The simulation engine** is a pure TypeScript package run as a Node CLI by Laravel queue jobs. Its drift parameters come from PoolCrunch's measurement of historical line movement. See [01](01-simulation-engine.md).
 - **Laravel** owns sync, snapshots, publishing and the website. See [02](02-simulation-outputs.md).
@@ -71,6 +71,8 @@ These survive the simplification and apply to all work:
 7. **The engines are pure:** no network, database, clock or `Math.random` inside them; seeded PRNG only.
 
 ## 5. Repository layout (proposed)
+
+Everything lives in this one repo. M0 builds the `packages/`; M1 scaffolds the Laravel app at the root beside them. SportsCrunch later gets the standings CLI as a built bundle rather than through a new repo (O9).
 
 ```text
 playoffodds/

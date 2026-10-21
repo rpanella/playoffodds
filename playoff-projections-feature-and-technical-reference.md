@@ -225,7 +225,7 @@ Roughly ordered by cost to build:
 
 **Market-blended** — Neil Paine's NBA "Composite Mode" blends his dual-Elo with FanDuel implied odds. Cheap accuracy boost, but it makes you partly derivative of the market rather than an independent voice.
 
-**Generic recommendation:** start with a transparent, measurable model. For PlayoffOdds, SportsCrunch anchors/ratings and captured immutable snapshots are already the decided direction; reconstructed history remains separately labeled.
+**Generic recommendation:** start with a transparent, measurable model. For PlayoffOdds, SportsCrunch anchors/matchup odds and captured immutable snapshots are already the decided direction; reconstructed history remains separately labeled.
 
 ## 4. Converting ratings to per-game win probability
 
@@ -286,11 +286,11 @@ Platform-risk lesson worth internalizing: FiveThirtyEight died with Disney's cut
 
 MoneyPuck — a one-person operation — runs Python on AWS and updates many times a day. That's your proof point for scope: this is solo-buildable.
 
-- **Upstream ingest:** SportsCrunch owns schedules/results, anchors and ratings; PlayoffOdds contract-tests and materializes the exact inputs at snapshot assembly.
+- **Upstream ingest:** SportsCrunch owns schedules/results, anchors and matchup odds; PlayoffOdds contract-tests and materializes the exact inputs at snapshot assembly.
 - **Sim job:** queued supervised TypeScript/Node worker for PlayoffOdds; simulation counts and vectorization strategy are benchmarked on representative bundles.
 - **Snapshot store:** retain captured daily outputs and exact canonical input bundles permanently. Retrospective backfill can add useful history only where cutoff inputs/rules/models are reconstructable and clearly labeled.
 - **Serving:** Laravel reads precomputed snapshots. No live simulation in the request path.
-- **Client:** ship the snapshot's own input file (games, probabilities, ratings, postseason state) plus the engine bundle, so the browser simulates exactly what the server did.
+- **Client:** ship the snapshot's own input file (games, probabilities, matchup odds, postseason state) plus the engine bundle, so the browser simulates exactly what the server did.
 
 ## 10. PlayoffOdds build-order application
 
