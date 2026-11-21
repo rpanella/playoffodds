@@ -64,7 +64,9 @@
     - Built: the mirror sync, the snapshot pipeline (`snapshot:run`, `snapshot:backfill`, `snapshot:list`) and the daily schedule at 9:00 ET.
     - Backfilled: 73 daily snapshots, Sep 9–Nov 20, 100k sims each, about 2.4 s per run.
     - The skip check compares probabilities with a 0.002 tolerance, because SportsCrunch's projections drift a little every minute (02 §3 step 4).
-    - Not yet: the after-finals trigger (webhook or poll), production deploy, Horizon.
+    - After-finals runs (webhook plus poll) built 2026-11-20.
+    - Production deploy on Forge per [docs/deploy/forge.md](../deploy/forge.md), first run planned for the weekend of Nov 21–22.
+    - Not yet: Horizon (the plain Redis queue worker covers the weekend test).
 - A minimal internal view or artisan command to list snapshots, their diagnostics and failures.
 - **SportsCrunch:** the matchup odds endpoint shipped on 2026-11-20 for the NFL. Next is the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
 
