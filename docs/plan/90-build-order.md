@@ -100,7 +100,8 @@ Per [features/14](features/14-clinch-magic-elimination.md) §3–4:
 
 ## M2 — Site (~Nov 16 – ~Dec 11)
 
-- Decide **O8** (how pages render without JavaScript) at the start.
+- Decide **O8** (how pages render without JavaScript) at the start. Decided: Inertia SSR (D56).
+- **Status 2026-11-21:** the bare-bones wireframe version (D59) is built: `/`, `/nfl`, `/nfl/seeds`, team pages and `/methodology`, server-rendered, with a sitemap and robots.txt. It's private behind basic auth. Design comes after clinching and scenarios.
 - Build the pages in [features/10](features/10-core-odds-displays.md) and [features/11](features/11-history-timeseries.md):
   - home page;
   - `/nfl` odds table;

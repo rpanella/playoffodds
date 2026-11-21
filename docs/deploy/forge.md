@@ -87,10 +87,11 @@ and before migrations:
 
 ```bash
 npm ci
-npm run build          # the site's assets (Vite+); the Wayfinder plugin calls `php artisan`
+npm run build:ssr      # the site's assets and the SSR bundle (Vite+); the Wayfinder plugin calls `php artisan`
 npm run build:cli      # the engine and standings CLIs into packages/cli/dist (gitignored)
 $FORGE_PHP artisan optimize
 $FORGE_PHP artisan migrate --force
+$FORGE_PHP artisan inertia:stop-ssr   # the SSR daemon (section 5) restarts with the new bundle
 ```
 
 Keep Forge's queue restart at the end of the script (`$FORGE_PHP artisan queue:restart` if your script doesn't
@@ -102,6 +103,10 @@ already include it), so the worker loads the new code.
   daily snapshot at 9:00 ET and the `snapshot:watch` poll every 10 minutes (`php artisan schedule:list` shows both).
 - **Queue worker:** add a worker (Forge daemon) with connection `redis`, queue `default`, timeout `600`,
   sleep `3`, 1 process. It runs the after-finals checks queued by webhooks and polls.
+- **SSR server (D56):** add a Forge daemon running `php artisan inertia:start-ssr` from the site's current
+  directory. It renders the Vue pages to HTML on port 13714 (localhost only). If it's down, pages still work but
+  arrive without server-rendered HTML, so check it after deploys: `curl -s https://playoffodds.com/nfl | grep -c data-server-rendered`
+  (with the basic-auth credentials) should print 1.
 
 ## 6. SportsCrunch
 
@@ -129,6 +134,8 @@ which proves the URL, the signature and the firewall path. A bad secret gives `4
 Checks:
 
 - `https://playoffodds.com` asks for the basic-auth credentials; `https://playoffodds.com/up` doesn't.
+- With the credentials, `/`, `/nfl`, `/nfl/seeds`, `/nfl/buffalo-bills` and `/methodology` load, and their HTML
+  contains the tables (server-rendered).
 - `php artisan schedule:list` shows `snapshot:run nfl --trigger=scheduled` daily at 14:00 UTC and `snapshot:watch` every 10 minutes.
 
 ## 8. Game day
