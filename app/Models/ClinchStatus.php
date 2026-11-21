@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $season_team_id
  * @property string $target playoffs, division or top_seed.
  * @property string $status clinched, eliminated or alive.
- * @property bool $controls_destiny
+ * @property bool|null $controls_destiny Alive teams only; null once clinched or eliminated.
  * @property bool $timed_out
  * @property string $method_version
  * @property array<string, mixed>|null $details

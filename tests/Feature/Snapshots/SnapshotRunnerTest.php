@@ -51,7 +51,8 @@ it('publishes a snapshot, makes it current and writes the current game probabili
     expect(ClinchStatus::where('snapshot_id', $snapshot->id)->count())->toBe(96)
         ->and(ClinchStatus::where('status', 'clinched')->count())->toBeGreaterThan(0)
         ->and(ClinchStatus::where('status', 'eliminated')->count())->toBeGreaterThan(0)
-        ->and(ClinchStatus::where('status', 'clinched')->where('controls_destiny', false)->count())->toBe(0)
+        ->and(ClinchStatus::where('status', '!=', 'alive')->whereNotNull('controls_destiny')->count())->toBe(0)
+        ->and(ClinchStatus::where('status', 'alive')->whereNull('controls_destiny')->count())->toBe(0)
         ->and(ClinchStatus::value('method_version'))->toBe('conservative-bnb@1')
         ->and($snapshot->diagnostics['clinch']['timed_out'])->toBe(0);
 

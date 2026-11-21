@@ -17,8 +17,9 @@ return new class extends Migration
             $table->foreignId('season_team_id')->constrained();
             $table->string('target', 16); // playoffs, division, top_seed
             $table->string('status', 16); // clinched, eliminated, alive
-            // Wins every remaining game, it clinches regardless of other results.
-            $table->boolean('controls_destiny');
+            // Alive teams only: winning every remaining game clinches regardless of other results.
+            // Null for clinched and eliminated teams, where it would only restate the status.
+            $table->boolean('controls_destiny')->nullable();
             // A search hit its time limit, so an alive status makes no claim.
             $table->boolean('timed_out')->default(false);
             $table->string('method_version', 32); // e.g. conservative-bnb@1

@@ -13,8 +13,11 @@ export interface ClinchStatus {
   team: string;
   target: ClinchTarget;
   status: ClinchState;
-  /** Wins every remaining game, it clinches regardless of other results. */
-  controls_destiny: boolean;
+  /**
+   * For an alive team: whether winning every remaining game clinches the target regardless of other results.
+   * Null once the team has clinched or been eliminated, where it would only restate the status.
+   */
+  controls_destiny: boolean | null;
   /** A search hit the time limit, so `alive` makes no claim either way. */
   timed_out: boolean;
 }
@@ -51,7 +54,7 @@ export function computeClinch(input: StandingsInput, opts: { timeLimitMs?: numbe
       const miss = branchAndBound(buildProblem(idx, s, rules, team, target, 'clinched'), performance.now() + limit).found;
       const make = miss === false ? true : branchAndBound(buildProblem(idx, s, rules, team, target, 'eliminated'), performance.now() + limit).found;
       const status: ClinchState = proven(miss) ? 'clinched' : proven(make) ? 'eliminated' : 'alive';
-      let destiny = status === 'clinched';
+      let destiny: boolean | null = null;
       let timedOut = miss === null || make === null;
       if (status === 'alive') {
         const ifWinsOut = branchAndBound(buildProblem(idx, s, rules, team, target, 'clinched', true), performance.now() + limit).found;
