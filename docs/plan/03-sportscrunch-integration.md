@@ -75,8 +75,14 @@ Playoff games aren't on the schedule, so they have no line and no game probabili
 
 ## 5. Sync and triggers
 
-- **Daily scheduled sync** of teams, games and probabilities for each active league-season before the daily snapshot.
-- **Game finals:** a webhook triggers a games re-pull and a debounced snapshot. A poll every 15 minutes during game windows covers missed webhooks.
+- **Daily snapshot:** each run first syncs the season's teams, alignment and games (`sportscrunch:sync`). Probabilities and matchup odds are fetched by the run itself (02 §3).
+- **Game finals (D53, D54):**
+  - **Webhook.** SportsCrunch sends signed `games` webhooks to `POST /webhooks/sportscrunch`.
+    - Deliveries go to the webhook URL on the SportsCrunch account that owns PlayoffOdds' token, signed with that account's secret (`SPORTSCRUNCH_WEBHOOK_SECRET`). The header is `X-Webhook-Signature: v1=<hmac-sha256 of the body>`, once per active secret.
+    - The receiver checks the signature, the payload's age (15 minutes) and the request ID (replays), then queues a check of the season 90 seconds later.
+    - The event is only a trigger. The check re-syncs the season and runs a snapshot if a result came in or a score changed.
+    - `sportscrunch:webhooks --subscribe` creates the subscription for the active season.
+  - **Poll.** While any game is in progress (kicked off in the last 8 hours and not settled), `snapshot:watch` queues the same check every 10 minutes.
 - **Failures:** retry with backoff. If SportsCrunch is down, no new snapshot is made and the site keeps showing the last good one (D40).
 
 ## 6. Historical data caveats

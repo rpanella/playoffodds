@@ -124,6 +124,39 @@ class InputBuilder
         return $max;
     }
 
+    /**
+     * Hash of the input's final games and scores. Compared with `mirrorResultsHash` to tell whether a
+     * result has come in (or been corrected) since a snapshot.
+     *
+     * @param  array<string, mixed>  $input
+     */
+    public static function resultsHash(array $input): string
+    {
+        $finals = array_filter($input['games'], fn (array $g): bool => $g['status'] === 'final');
+
+        return self::hashResults(array_map(fn (array $g): string => "{$g['id']}:{$g['home_score']}-{$g['away_score']}", $finals));
+    }
+
+    /** The same hash from the mirror, for the games an input built at `$asOf` would count as final. */
+    public static function mirrorResultsHash(Season $season, CarbonImmutable $asOf): string
+    {
+        $finals = $season->games()
+            ->where('season_type', 'regular')
+            ->whereIn('status', self::FINAL_STATUSES)
+            ->where('start_at', '<', $asOf)
+            ->get(['sc_game_id', 'home_score', 'away_score']);
+
+        return self::hashResults($finals->map(fn (Game $g): string => "sc-{$g->sc_game_id}:{$g->home_score}-{$g->away_score}")->all());
+    }
+
+    /** @param  array<string>  $results */
+    private static function hashResults(array $results): string
+    {
+        sort($results);
+
+        return hash('sha256', implode("\n", $results));
+    }
+
     /** @param  array<string, mixed>  $input */
     public static function json(array $input): string
     {

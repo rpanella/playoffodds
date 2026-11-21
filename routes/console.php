@@ -10,3 +10,11 @@ foreach (config()->array('leagues') as $code => $league) {
         ->withoutOverlapping()
         ->onOneServer();
 }
+
+// The polling fallback for SportsCrunch's webhooks (02 §3 step 1): cheap when no game is in progress.
+if (config('snapshots.poll.enabled')) {
+    Schedule::command('snapshot:watch')
+        ->cron('*/'.config()->integer('snapshots.poll.every_minutes').' * * * *')
+        ->withoutOverlapping()
+        ->onOneServer();
+}

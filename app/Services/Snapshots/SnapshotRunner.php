@@ -40,7 +40,7 @@ class SnapshotRunner
         // One run at a time per season, so runs can't race on the current pointer.
         $lock = Cache::lock("snapshot-season-{$season->id}", 1800);
         if (! $lock->get()) {
-            throw new SnapshotException("Another snapshot run for {$season->league->code} {$season->year} is in progress");
+            throw new SnapshotLockedException("Another snapshot run for {$season->league->code} {$season->year} is in progress");
         }
 
         try {
@@ -98,6 +98,7 @@ class SnapshotRunner
             'input_path' => $path,
             'input_sha256' => hash('sha256', $json),
             'content_sha256' => $contentHash,
+            'results_sha256' => InputBuilder::resultsHash($input),
             'engine_build' => $engineBuild,
         ]);
 

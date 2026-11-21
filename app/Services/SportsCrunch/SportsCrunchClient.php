@@ -63,6 +63,33 @@ class SportsCrunchClient
         return $this->get("/seasons/{$season}/matchup-odds", ['at' => self::instant($at)]);
     }
 
+    /**
+     * This account's webhook subscriptions. Deliveries go to the account's webhook URL, set in SportsCrunch.
+     *
+     * @return list<array<mixed>>
+     */
+    public function webhookSubscriptions(): array
+    {
+        return $this->rows('/webhooks/subscriptions');
+    }
+
+    /**
+     * Subscribes this account to a season's game updates, optionally only those reaching `$status`.
+     * Not retried: a repeated POST could create a second subscription.
+     *
+     * @return array<mixed>
+     */
+    public function createWebhookSubscription(int $season, ?string $status = null): array
+    {
+        $body = ['resource' => 'games', 'season_id' => $season] + ($status === null ? [] : ['filters' => ['status' => $status]]);
+        $data = $this->request(retry: false)->post('/webhooks/subscriptions', $body)->throw()->json('data');
+        if (! is_array($data)) {
+            throw new SportsCrunchException('SportsCrunch /webhooks/subscriptions: response has no data');
+        }
+
+        return $data;
+    }
+
     /** `at` as the API expects it: UTC, whole seconds. */
     public static function instant(DateTimeInterface $at): string
     {
@@ -102,18 +129,21 @@ class SportsCrunchClient
         return $data;
     }
 
-    private function request(): PendingRequest
+    private function request(bool $retry = true): PendingRequest
     {
         if ($this->token === null || $this->token === '') {
             throw new SportsCrunchException('SPORTSCRUNCH_API_KEY is not set');
         }
 
-        return Http::baseUrl(rtrim($this->url, '/').'/api/v1')
+        $request = Http::baseUrl(rtrim($this->url, '/').'/api/v1')
             ->withToken($this->token)
             ->acceptJson()
             ->connectTimeout(5)
-            ->timeout($this->timeout)
-            ->retry(self::RETRY_DELAYS, 0, fn (Throwable $e): bool => $e instanceof ConnectionException
-                || ($e instanceof RequestException && ($e->response->serverError() || $e->response->status() === 429)));
+            ->timeout($this->timeout);
+
+        return $retry
+            ? $request->retry(self::RETRY_DELAYS, 0, fn (Throwable $e): bool => $e instanceof ConnectionException
+                || ($e instanceof RequestException && ($e->response->serverError() || $e->response->status() === 429)))
+            : $request;
     }
 }

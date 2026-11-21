@@ -18,6 +18,10 @@ return [
         'url' => env('SPORTSCRUNCH_API_URL', 'https://sportscrunch.com'),
         'token' => env('SPORTSCRUNCH_API_KEY'),
         'timeout' => (int) env('SPORTSCRUNCH_API_TIMEOUT', 60),
+        // The signing secret of the SportsCrunch account whose webhook URL points here.
+        'webhook_secret' => env('SPORTSCRUNCH_WEBHOOK_SECRET'),
+        // Reject webhooks whose payload timestamp is older than this (SportsCrunch retries for ~6 minutes).
+        'webhook_tolerance_seconds' => 900,
     ],
 
     'postmark' => [

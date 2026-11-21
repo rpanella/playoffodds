@@ -22,6 +22,7 @@ use Illuminate\Support\Carbon;
  * @property string|null $input_path
  * @property string|null $input_sha256
  * @property string|null $content_sha256
+ * @property string|null $results_sha256
  * @property string|null $engine_build
  * @property string $seed
  * @property int $sims
@@ -37,7 +38,7 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  */
 #[Fillable([
-    'id', 'league_id', 'season_id', 'as_of', 'trigger', 'origin', 'status', 'input_path', 'input_sha256', 'content_sha256',
+    'id', 'league_id', 'season_id', 'as_of', 'trigger', 'origin', 'status', 'input_path', 'input_sha256', 'content_sha256', 'results_sha256',
     'engine_build', 'seed', 'sims', 'engine_version', 'standings_version', 'rules_id', 'runtime_ms', 'diagnostics', 'error',
     'superseded_by_id', 'published_at',
 ])]
