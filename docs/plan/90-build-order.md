@@ -60,6 +60,11 @@
 - Snapshot job per [02](02-simulation-outputs.md) §3: build input, skip if unchanged, store gzipped input, run the CLI, publish in a transaction, leave current untouched on failure.
 - Triggers: daily schedule, webhook or poll after game finals (debounced), and an artisan command for manual runs.
 - Backfill the 2026 NFL season from Week 1 as `reconstructed` daily snapshots.
+  - **Status 2026-11-20 (local):**
+    - Built: the mirror sync, the snapshot pipeline (`snapshot:run`, `snapshot:backfill`, `snapshot:list`) and the daily schedule at 9:00 ET.
+    - Backfilled: 73 daily snapshots, Sep 9–Nov 20, 100k sims each, about 2.4 s per run.
+    - The skip check compares probabilities with a 0.002 tolerance, because SportsCrunch's projections drift a little every minute (02 §3 step 4).
+    - Not yet: the after-finals trigger (webhook or poll), production deploy, Horizon.
 - A minimal internal view or artisan command to list snapshots, their diagnostics and failures.
 - **SportsCrunch:** the matchup odds endpoint shipped on 2026-11-20 for the NFL. Next is the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
 

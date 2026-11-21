@@ -16,5 +16,10 @@ return [
             'American Football Conference' => 'AFC',
             'National Football Conference' => 'NFC',
         ],
+        // Simulation parameters (01 §4-5): PoolCrunch's measured line drift and the tie rate.
+        'engine' => [
+            'drift' => 'nfl-line-drift@v2',
+            'tie_rate' => 0.00373,
+        ],
     ],
 ];

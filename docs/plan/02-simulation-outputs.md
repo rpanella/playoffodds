@@ -34,11 +34,11 @@ Laravel keeps a local mirror of the SportsCrunch data it needs, runs simulations
 
 | Table | Key columns |
 |---|---|
-| `snapshots` | `id` (ULID), `league_id`, `season_id`, `as_of`, `trigger` (`scheduled`, `game_final`, `backfill`, `manual`), `origin` (`live`, `reconstructed`), `status` (`pending`, `running`, `published`, `failed`), `input_path`, `input_sha256`, `seed`, `sims`, `engine_version`, `standings_version`, `rules_id`, `runtime_ms`, `diagnostics` (json), `error`, `superseded_by_id`, `created_at`, `published_at` |
-| `current_snapshots` | `league_id`, `season_id` (primary key), `snapshot_id`, `updated_at` |
+| `snapshots` | `id` (ULID), `league_id`, `season_id`, `as_of`, `trigger` (`scheduled`, `game_final`, `backfill`, `manual`), `origin` (`live`, `reconstructed`), `status` (`pending`, `running`, `published`, `failed`), `input_path`, `input_sha256`, `content_sha256` (the input without `as_of`, the seed and the probabilities; step 4), `engine_build` (hash of the two CLI bundles), `seed`, `sims`, `engine_version`, `standings_version`, `rules_id`, `runtime_ms`, `diagnostics` (json), `error`, `superseded_by_id`, `created_at`, `published_at` |
+| `current_snapshots` | `season_id` (primary key; the season implies the league), `snapshot_id`, `created_at`, `updated_at` |
 | `snapshot_standings` | `snapshot_id`, `season_team_id`, `wins`, `losses`, `ties`, `win_pct`, `division_rank`, `conference_rank`, `seed` (if season ended, nullable), `extras` (json: division/conference records etc. for display) |
 | `team_odds` | `snapshot_id`, `season_team_id`, `p_playoffs`, `p_division`, `p_top_seed`, `p_seed` (json array), `p_round` (json), `p_champion`, `wins_mean`, `wins_p10`, `wins_p50`, `wins_p90`, `wins_hist` (json) |
-| `clinch_statuses` | `snapshot_id`, `season_team_id`, `target` (`playoffs`, `division`, `top_seed`), `status` (`clinched`, `eliminated`, `alive`), `controls_destiny` (bool, null when not checked), `method_version`, `runtime_ms`, `details` (json: e.g. counterexample summary) |
+| `clinch_statuses` | `snapshot_id`, `season_team_id`, `target` (`playoffs`, `division`, `top_seed`), `status` (`clinched`, `eliminated`, `alive`), `controls_destiny` (bool, null when not checked), `method_version`, `runtime_ms`, `details` (json: e.g. counterexample summary). Created with the clinch CLI (clinch track); the M1 pipeline publishes without it |
 
 **Game probabilities on `games` are the current snapshot's**, not a synced copy. The sync never writes `p_home` or `p_source`. The publish step writes them from the input of the snapshot that becomes current, with `odds_snapshot_id`, so a page's game probabilities always match the odds shown beside them. Only current values are kept. Pages that show game probabilities (the team page's remaining schedule, the API's team endpoint) need only those, and the picker reads the current input file. Each snapshot's stored input already holds the probabilities it used, so history is there if a feature ever needs it.
 
@@ -47,15 +47,15 @@ Store probabilities as decimals in [0, 1], for example `DECIMAL(7,6)`. Later fea
 ## 3. Snapshot job
 
 1. **Trigger.** Runs on a daily schedule at the league's snapshot time and after game finals, debounced so a slate of games produces one run once the last game in a window goes final. Also runs for backfill or manually from an artisan command.
-2. **Sync.** Refresh the mirror for the league-season from SportsCrunch (games, scores, probabilities, matchup odds).
-3. **Build input.** Build `SimInput` ([01](01-simulation-engine.md) §2) from local tables with the cutoff at `as_of`.
-4. **Skip if nothing changed.** If the input's sha256 and the engine and standings versions match the current snapshot, stop without creating a snapshot.
+2. **Sync.** Refresh the mirror for the league-season from SportsCrunch: teams, alignment, games and scores (`sportscrunch:sync`). Probabilities and matchup odds are not mirrored; step 3 fetches them.
+3. **Build input.** Build `SimInput` ([01](01-simulation-engine.md) §2) from local tables with the cutoff at `as_of`, plus `historical-odds?at=` and `matchup-odds?at=` fetched at that instant. A game counts as final only if SportsCrunch has it final (or forfeit) and it started before `as_of`; canceled stays canceled; everything else is scheduled with its probability. So a backfilled day simulates games that hadn't been played yet. Postseason games are left out until postseason resume (M4).
+4. **Skip if nothing changed.** Skip, creating nothing, when the latest published snapshot up to this `as_of` has the same `content_sha256` and `engine_build`, and no game or matchup probability has moved by more than 0.002 (`snapshots.skip_tolerance`). An exact hash of the whole input would never match: SportsCrunch's projections drift by about 0.0001 a minute on their own, because its predictor weights games by elapsed time.
 5. **Store input.** Gzip the input and write it to `snapshots/{league}/{season}/{snapshot_id}.json.gz` on the artifact disk (S3 in production), then record the sha256.
-6. **Run.** Spawn the engine CLI (`node packages/cli/dist/simulate.mjs`) with Laravel's `Process` facade, with a timeout, and parse the output JSON. Then run the clinch CLI (`clinch` command, [features/14](features/14-clinch-magic-elimination.md)) on the same input, passing the simulation's 0%/100% results as its screen.
+6. **Run.** Spawn the engine CLI (`node packages/cli/dist/simulate.mjs`) and the standings CLI (`standings.mjs standings`, for "if the season ended") on the same input with Laravel's `Process` facade, with a timeout, and parse the output JSON. Then run the clinch CLI (`clinch` command, [features/14](features/14-clinch-magic-elimination.md)) on the same input, passing the simulation's 0%/100% results as its screen.
 7. **Publish.** In one database transaction, insert `snapshot_standings`, `team_odds` and `clinch_statuses`, mark the snapshot `published`, and upsert `current_snapshots`. If the snapshot becomes current, also write each remaining game's `p_home`, `p_source` and `odds_snapshot_id` from its input. A backfilled snapshot older than the current one doesn't.
 8. **On failure** at any step: mark the snapshot `failed` with the error, leave `current_snapshots` untouched, and alert after repeated failures.
 
-Jobs run on the Laravel queue (Horizon/Redis), one job at a time per league-season so runs don't race. The seed is derived from the snapshot ID.
+Runs hold a cache lock per season, so two runs can't race on the current pointer. The seed is the snapshot ID. As built in M1: `snapshot:run` (live, or `--at=` to reconstruct), `snapshot:backfill` (one per day at the league's snapshot time) and `snapshot:list`; the scheduler runs `snapshot:run` daily at each league's time. The after-finals trigger and the queue (Horizon/Redis in production) come with the webhook step.
 
 ## 4. Reproducibility and corrections
 
