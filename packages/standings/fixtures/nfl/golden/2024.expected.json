@@ -1,0 +1,55 @@
+{
+  "season": 2024,
+  "retrieved": "2026-10-21",
+  "sources": [
+    "https://www.nfl.com/standings/conference/2024/REG",
+    "https://en.wikipedia.org/wiki/Template:2024_AFC_standings",
+    "https://en.wikipedia.org/wiki/Template:2024_NFC_standings",
+    "https://en.wikipedia.org/wiki/2024_NFL_season",
+    "https://en.wikipedia.org/wiki/2024–25_NFL_playoffs",
+    "https://www.therams.com/news/rams-clinch-2024-nfc-west-title-wild-card-playoff-tickets-sofi-stadium",
+    "https://www.cbssports.com/nfl/news/how-the-commanders-could-clinch-the-nfc-west-for-the-rams-heres-the-nfls-craziest-week-17-playoff-scenario"
+  ],
+  "seeds": {
+    "AFC": [
+      "nfl-kc",
+      "nfl-buf",
+      "nfl-bal",
+      "nfl-hou",
+      "nfl-lac",
+      "nfl-pit",
+      "nfl-den"
+    ],
+    "NFC": [
+      "nfl-det",
+      "nfl-phi",
+      "nfl-tb",
+      "nfl-lar",
+      "nfl-min",
+      "nfl-wsh",
+      "nfl-gb"
+    ]
+  },
+  "records": {
+    "nfl-kc": "15-2-0",
+    "nfl-buf": "13-4-0",
+    "nfl-bal": "12-5-0",
+    "nfl-hou": "10-7-0",
+    "nfl-lac": "11-6-0",
+    "nfl-pit": "10-7-0",
+    "nfl-den": "10-7-0",
+    "nfl-det": "15-2-0",
+    "nfl-phi": "14-3-0",
+    "nfl-tb": "10-7-0",
+    "nfl-lar": "10-7-0",
+    "nfl-min": "14-3-0",
+    "nfl-wsh": "12-5-0",
+    "nfl-gb": "11-6-0"
+  },
+  "tiebreak_notes": [
+    "AFC No. 6 seed (PIT vs DEN, both 10-7): 'Pittsburgh clinched the #6 seed over Denver based on head-to-head victory.'",
+    "NFC West (LAR vs SEA, both 10-7): 'Los Angeles clinched the NFC West and #4 seed over Seattle based on strength of victory. (Los Angeles .441 to Seattle .424)' SOV is the 5th division step, after head-to-head, division record, common games and conference record were all even. Clinched in Week 17. [Corroborated by therams.com, NBC and CBS Sports.]",
+    "NFC No. 3 seed (TB vs LAR, both 10-7): 'Tampa Bay clinched the #3 seed over Los Angeles based on conference record. (Tampa Bay 8-4 to Los Angeles 6-6)'",
+    "NFC North: DET (15-2) won outright over MIN (14-3). No tiebreak; MIN became the No. 5 wild card."
+  ]
+}

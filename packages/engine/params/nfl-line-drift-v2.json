@@ -1,0 +1,41 @@
+{
+  "id": "nfl-line-drift@v2",
+  "what": "Team component of PoolCrunch's fitted NFL line-drift generator: a per-team random walk on the log-odds scale. Ported per docs/plan/01-simulation-engine.md section 4 (D51).",
+  "provenance": {
+    "source": "poolcrunch/ml/simulator/params/line_drift_generator_v2.json",
+    "source_sha256": "f46d7bb6f5cbc90f363785010d951ffae932298f1e04e0ae0322c5e89e4029d5",
+    "source_commit": "58a2786d 2026-08-15",
+    "source_version": "v2",
+    "fit_date": "2026-08-12",
+    "fit_provenance": "fit_from_registry_measurement_nfl_2014_2025",
+    "measured_from": "poolcrunch/ml/simulator/params/line_drift_v2.json",
+    "measured_sha256": "sha256:0c9c016040f30f320caa8ba2ce3ec285f44653f6342ded59cd9210edef6dc0db",
+    "copied": "2026-10-21"
+  },
+  "horizon_unit": "weeks between the board and the game's week",
+  "scale": "logit",
+  "max_horizon": 17,
+  "team_increment_var": [
+    0.0,
+    0.0395925149103086,
+    0.04655932639383291,
+    0.014655271933965111,
+    0.013327295318327825,
+    0.012168947584209971,
+    0.01216894758421,
+    0.01216894758421,
+    0.01216894758421,
+    0.012168947584209971,
+    0.012168947584209971,
+    0.01216894758421,
+    0.01216894758421,
+    0.01216894758421,
+    0.01764961621632724,
+    0.016136403495499024,
+    0.01799440468502611,
+    0.01799440468502611
+  ],
+  "team_walk_var": 0.012168947584209989,
+  "student_t_nu": 4.7904654634160515,
+  "clip_logits": 6.0
+}

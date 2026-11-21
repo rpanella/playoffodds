@@ -1,0 +1,57 @@
+{
+  "season": 2023,
+  "retrieved": "2026-10-21",
+  "sources": [
+    "https://www.nfl.com/standings/conference/2023/REG",
+    "https://en.wikipedia.org/wiki/Template:2023_AFC_standings",
+    "https://en.wikipedia.org/wiki/Template:2023_NFC_standings",
+    "https://en.wikipedia.org/wiki/2023_NFL_season",
+    "https://en.wikipedia.org/wiki/2023–24_NFL_playoffs",
+    "https://en.wikipedia.org/wiki/2023_Green_Bay_Packers_season"
+  ],
+  "seeds": {
+    "AFC": [
+      "nfl-bal",
+      "nfl-buf",
+      "nfl-kc",
+      "nfl-hou",
+      "nfl-cle",
+      "nfl-mia",
+      "nfl-pit"
+    ],
+    "NFC": [
+      "nfl-sf",
+      "nfl-dal",
+      "nfl-det",
+      "nfl-tb",
+      "nfl-phi",
+      "nfl-lar",
+      "nfl-gb"
+    ]
+  },
+  "records": {
+    "nfl-bal": "13-4-0",
+    "nfl-buf": "11-6-0",
+    "nfl-kc": "11-6-0",
+    "nfl-hou": "10-7-0",
+    "nfl-cle": "11-6-0",
+    "nfl-mia": "11-6-0",
+    "nfl-pit": "10-7-0",
+    "nfl-sf": "12-5-0",
+    "nfl-dal": "12-5-0",
+    "nfl-det": "12-5-0",
+    "nfl-tb": "9-8-0",
+    "nfl-phi": "11-6-0",
+    "nfl-lar": "10-7-0",
+    "nfl-gb": "9-8-0"
+  },
+  "tiebreak_notes": [
+    "AFC East (BUF vs MIA, both 11-6): 'Buffalo finished ahead of Miami in the AFC East based on head-to-head sweep.'",
+    "AFC No. 2 seed (BUF vs KC, both 11-6): 'Buffalo claimed the No. 2 seed over Kansas City based on head-to-head victory.'",
+    "AFC No. 5 seed (CLE vs MIA, both 11-6): 'Cleveland claimed the No. 5 seed over Miami based on conference record.' (CLE 8-4, MIA 7-5)",
+    "AFC South: HOU won outright at 10-7 (JAX and IND 9-8). PIT (10-7) got No. 7 outright over the 9-8 teams (CIN, JAX, IND).",
+    "NFC No. 1-3 seeds, three-way tie at 12-5 (SF, DAL, DET): 'San Francisco finished ahead of Dallas and Detroit based on conference record, claiming the No. 1 seed.' (SF 10-2, DAL 9-3, DET 8-4) Then 'Dallas claimed the No. 2 seed over Detroit based on head-to-head victory.'",
+    "NFC South (TB vs NO, both 9-8): 'Tampa Bay finished ahead of New Orleans in the NFC South based on common record.' (TB 8-4, NO 6-6 in common games)",
+    "NFC No. 7 seed, three-way tie at 9-8 (GB, SEA, NO): 'Green Bay and Seattle finished ahead of New Orleans based on conference record.' Then 'Green Bay finished ahead of Seattle based on strength of victory, claiming the 7th and final playoff spot.' [The 2023 Green Bay Packers season Wikipedia page says the same, but it is not an independent source. I found no NFL.com text confirming the SOV step.]"
+  ]
+}

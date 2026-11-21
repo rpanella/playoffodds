@@ -1,0 +1,10 @@
+{
+  "name": "@playoffodds/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@playoffodds/engine": "*",
+    "@playoffodds/standings": "*"
+  }
+}

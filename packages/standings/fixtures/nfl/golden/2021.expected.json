@@ -1,0 +1,55 @@
+{
+  "season": 2021,
+  "retrieved": "2026-10-21",
+  "sources": [
+    "https://www.nfl.com/standings/conference/2021/REG",
+    "https://en.wikipedia.org/wiki/Template:2021_AFC_standings",
+    "https://en.wikipedia.org/wiki/Template:2021_NFC_standings",
+    "https://en.wikipedia.org/wiki/2021_NFL_season",
+    "https://en.wikipedia.org/wiki/2021–22_NFL_playoffs"
+  ],
+  "seeds": {
+    "AFC": [
+      "nfl-ten",
+      "nfl-kc",
+      "nfl-buf",
+      "nfl-cin",
+      "nfl-lv",
+      "nfl-ne",
+      "nfl-pit"
+    ],
+    "NFC": [
+      "nfl-gb",
+      "nfl-tb",
+      "nfl-dal",
+      "nfl-lar",
+      "nfl-ari",
+      "nfl-sf",
+      "nfl-phi"
+    ]
+  },
+  "records": {
+    "nfl-ten": "12-5-0",
+    "nfl-kc": "12-5-0",
+    "nfl-buf": "11-6-0",
+    "nfl-cin": "10-7-0",
+    "nfl-lv": "10-7-0",
+    "nfl-ne": "10-7-0",
+    "nfl-pit": "9-7-1",
+    "nfl-gb": "13-4-0",
+    "nfl-tb": "13-4-0",
+    "nfl-dal": "12-5-0",
+    "nfl-lar": "12-5-0",
+    "nfl-ari": "11-6-0",
+    "nfl-sf": "10-7-0",
+    "nfl-phi": "9-8-0"
+  },
+  "tiebreak_notes": [
+    "AFC No. 1 seed (TEN vs KC, both 12-5): 'Tennessee finished ahead of Kansas City based on head-to-head victory, claiming the No. 1 seed.'",
+    "AFC No. 5 seed (LV vs NE, both 10-7): 'Las Vegas claimed the No. 5 seed over New England based on win percentage in common games (5-1 vs. 2-4 against: Miami, Dallas, LA Chargers, Cleveland, and Indianapolis).'",
+    "AFC No. 7: PIT (9-7-1, .559) beat IND (9-8, .529) on winning percentage; the tie game decided it, not a tiebreaker.",
+    "NFC No. 1 seed (GB vs TB, both 13-4): 'Green Bay finished ahead of Tampa Bay based on conference record (9-3 vs. 8-4), claiming the No. 1 seed.'",
+    "NFC No. 3 seed (DAL vs LAR, both 12-5): 'Dallas claimed the No. 3 seed over LA Rams based on conference record (10-2 vs. 8-4).'",
+    "NFC No. 7 seed (PHI vs NO, both 9-8): 'Philadelphia finished ahead of New Orleans based on head-to-head victory, claiming the 7th and final playoff spot.'"
+  ]
+}

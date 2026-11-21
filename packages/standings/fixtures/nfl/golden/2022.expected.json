@@ -1,0 +1,58 @@
+{
+  "season": 2022,
+  "retrieved": "2026-10-21",
+  "sources": [
+    "https://www.nfl.com/standings/conference/2022/REG",
+    "https://en.wikipedia.org/wiki/Template:2022_AFC_standings",
+    "https://en.wikipedia.org/wiki/Template:2022_NFC_standings",
+    "https://en.wikipedia.org/wiki/2022_NFL_season",
+    "https://en.wikipedia.org/wiki/2022–23_NFL_playoffs",
+    "https://www.nfl.com/news/nfl-owners-approve-resolution-to-adjust-afc-postseason-including-potential-neutr",
+    "https://www.nfl.com/news/bills-chiefs-neutral-site-afc-championship-game-in-play-bengals-avoid-coin-toss-"
+  ],
+  "seeds": {
+    "AFC": [
+      "nfl-kc",
+      "nfl-buf",
+      "nfl-cin",
+      "nfl-jax",
+      "nfl-lac",
+      "nfl-bal",
+      "nfl-mia"
+    ],
+    "NFC": [
+      "nfl-phi",
+      "nfl-sf",
+      "nfl-min",
+      "nfl-tb",
+      "nfl-dal",
+      "nfl-nyg",
+      "nfl-sea"
+    ]
+  },
+  "records": {
+    "nfl-kc": "14-3-0",
+    "nfl-buf": "13-3-0",
+    "nfl-cin": "12-4-0",
+    "nfl-jax": "9-8-0",
+    "nfl-lac": "10-7-0",
+    "nfl-bal": "10-7-0",
+    "nfl-mia": "9-8-0",
+    "nfl-phi": "14-3-0",
+    "nfl-sf": "13-4-0",
+    "nfl-min": "13-4-0",
+    "nfl-tb": "8-9-0",
+    "nfl-dal": "12-5-0",
+    "nfl-nyg": "9-7-1",
+    "nfl-sea": "9-8-0"
+  },
+  "tiebreak_notes": [
+    "Canceled game: the Week 17 BUF at CIN game was canceled, not resumed, so BUF (13-3) and CIN (12-4) played 16 games. Seeding was by winning percentage: KC .824 > BUF .8125 for No. 1. CIN won the AFC North over BAL (10-7) on winning percentage (.750 vs .588); per Wikipedia, 'By canceling the game, the Bengals automatically clinched the AFC North division championship based on winning percentage.'",
+    "Special resolution (NFL owners, Jan 2023): it did not change any seed. (a) Because BUF and KC both won in Week 18, a BUF-KC AFC Championship would have been played at a neutral site (Atlanta). It never happened, since CIN beat BUF in the Divisional round. (b) A coin toss for home field in a BAL-CIN wild-card game would have applied only if BAL had beaten CIN in Week 18. CIN won, so no toss was needed and No. 3 CIN hosted No. 6 BAL.",
+    "AFC No. 5 seed (LAC vs BAL, both 10-7): 'LA Chargers claimed the No. 5 seed over Baltimore based on conference record (7-5 vs. 6-6).' [The 2022-23 NFL playoffs Wikipedia page says the same.]",
+    "AFC No. 7 seed (MIA vs PIT, both 9-8): 'Miami finished ahead of Pittsburgh based on head-to-head victory, claiming the 7th and final playoff spot.'",
+    "NFC No. 2 seed (SF vs MIN, both 13-4): 'San Francisco claimed the No. 2 seed over Minnesota based on conference record (10-2 vs. 8-4).'",
+    "NFC No. 7 seed (SEA vs DET, both 9-8): 'Seattle finished ahead of Detroit based on head-to-head victory, claiming the 7th and final playoff spot.'",
+    "NYG (9-7-1) got No. 6 on winning percentage (.559), ahead of the 9-8 teams; no tiebreaker was needed."
+  ]
+}

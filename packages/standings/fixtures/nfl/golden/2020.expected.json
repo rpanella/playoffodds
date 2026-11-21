@@ -1,0 +1,54 @@
+{
+  "season": 2020,
+  "retrieved": "2026-10-21",
+  "sources": [
+    "https://www.nfl.com/standings/conference/2020/REG",
+    "https://en.wikipedia.org/wiki/Template:2020_AFC_standings",
+    "https://en.wikipedia.org/wiki/Template:2020_NFC_standings",
+    "https://en.wikipedia.org/wiki/2020_NFL_season",
+    "https://en.wikipedia.org/wiki/2020–21_NFL_playoffs"
+  ],
+  "seeds": {
+    "AFC": [
+      "nfl-kc",
+      "nfl-buf",
+      "nfl-pit",
+      "nfl-ten",
+      "nfl-bal",
+      "nfl-cle",
+      "nfl-ind"
+    ],
+    "NFC": [
+      "nfl-gb",
+      "nfl-no",
+      "nfl-sea",
+      "nfl-wsh",
+      "nfl-tb",
+      "nfl-lar",
+      "nfl-chi"
+    ]
+  },
+  "records": {
+    "nfl-kc": "14-2-0",
+    "nfl-buf": "13-3-0",
+    "nfl-pit": "12-4-0",
+    "nfl-ten": "11-5-0",
+    "nfl-bal": "11-5-0",
+    "nfl-cle": "11-5-0",
+    "nfl-ind": "11-5-0",
+    "nfl-gb": "13-3-0",
+    "nfl-no": "12-4-0",
+    "nfl-sea": "12-4-0",
+    "nfl-wsh": "7-9-0",
+    "nfl-tb": "11-5-0",
+    "nfl-lar": "10-6-0",
+    "nfl-chi": "8-8-0"
+  },
+  "tiebreak_notes": [
+    "AFC South (TEN vs IND, both 11-5): 'Tennessee finished ahead of Indianapolis in the AFC South based on division record.' (TEN 5-1, IND 4-2)",
+    "AFC wild cards, three-way tie at 11-5 (BAL, CLE, IND): 'Baltimore claimed the No. 5 seed over Indianapolis based on head-to-head victory. Division tiebreaker used to eliminate Cleveland' / 'Baltimore claimed the No. 5 seed over Cleveland based on head-to-head sweep.' / 'Cleveland claimed the No. 6 seed over Indianapolis based on head-to-head victory.' MIA (10-6) missed on record, not a tiebreak.",
+    "NFC No. 2 seed (NO vs SEA, both 12-4): 'New Orleans finished ahead of Seattle based on conference record.' (NO 10-2, SEA 9-3)",
+    "NFC No. 7 seed (CHI vs ARI, both 8-8): 'Chicago finished and clinched the 7th and final playoff spot ahead of Arizona based on better win percentage in common games' (CHI 3-2, ARI 1-4 vs DET, NYG, CAR, LAR). [The 2020-21 NFL playoffs Wikipedia page also says the Bears advanced on common opponents.]",
+    "Name note: Washington played 2020 as the 'Washington Football Team'; NFL.com's standings page now labels the row 'Washington Commanders'."
+  ]
+}
