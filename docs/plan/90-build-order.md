@@ -47,6 +47,15 @@
 ## M1 — Pipeline (~Nov 2 – ~Nov 16)
 
 - Scaffold Laravel 13 with the official Vue starter kit (D37), MySQL `podds` and Horizon, after confirming current versions.
+  - **Done 2026-11-20** (Horizon not yet):
+    - Laravel 13.43, Inertia 3, Vue 3.5, Pest 5, Pint, Larastan, Boost.
+    - Vite+ (`vp`) for the front end.
+    - No authentication scaffolding, since there are no accounts in v1 (D25).
+    - The app sits at the repo root beside `packages/`, sharing one npm workspace.
+    - TypeScript is 5.9 for both the app and the packages. `vue-tsc` needs TypeScript's JS API, which TypeScript 7 doesn't ship.
+    - `npm run typecheck` checks both (`tsconfig.packages.json` and `tsconfig.json`), and the Vite+ lint and format check covers only the app.
+    - Local site: `https://playoffodds.test` (Herd).
+    - Queue and cache use the database for now. Horizon needs Redis and `pcntl`, which Windows doesn't have.
 - Mirror tables and a SportsCrunch client; scheduled sync. The client fetches `matchup-odds?at=` at the same instant as `historical-odds?at=` (NFL only so far). A consumer test pins the matrix-versus-unlined-game check, skipping teams with week-varying adjustments ([03](03-sportscrunch-integration.md) §4).
 - Snapshot job per [02](02-simulation-outputs.md) §3: build input, skip if unchanged, store gzipped input, run the CLI, publish in a transaction, leave current untouched on failure.
 - Triggers: daily schedule, webhook or poll after game finals (debounced), and an artisan command for manual runs.
