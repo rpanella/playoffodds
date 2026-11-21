@@ -11,3 +11,5 @@ export { STANDINGS_VERSION } from './version';
 export { CLINCH_METHOD, computeClinch } from './clinch/compute';
 export type { ClinchOptions, ClinchOutput, ClinchState, ClinchStatus } from './clinch/compute';
 export type { ClinchTarget } from './clinch/problem';
+export { replayClinches, weekOf } from './clinch/replay';
+export type { FirstClinch } from './clinch/replay';

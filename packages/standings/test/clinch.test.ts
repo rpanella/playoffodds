@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import highsLoader from 'highs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { CLINCH_METHOD, computeClinch, computeStandings, prepareSeason, type GameInput, type StandingsInput } from '../src';
+import { CLINCH_METHOD, computeClinch, computeStandings, prepareSeason, replayClinches, type FirstClinch, type GameInput, type StandingsInput } from '../src';
 import { buildProblem, CLINCH_TARGETS, goal, type ClinchProblem, type ClinchQuestion, type ClinchTarget } from '../src/clinch/problem';
 import { branchAndBound, bruteForce, integerProgram, type LpSolver } from '../src/clinch/solvers';
 import { fullTeams } from './helpers';
@@ -189,6 +189,29 @@ describe('clinch searches', () => {
     }
     expect(out.statuses.some((x) => x.status === 'alive' && x.controls_destiny)).toBe(true);
     expect(out.statuses.every((x) => !x.timed_out)).toBe(true);
+  });
+
+  it('is never ahead of the league, on official clinch dates for 2020-2025', () => {
+    const official = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/nfl/clinch-official/2020-2025.json', import.meta.url)), 'utf8')) as {
+      seasons: Record<string, { team_id: string; type: FirstClinch['type']; after_week: number }[]>;
+    };
+    let sameWeek = 0, total = 0;
+    for (const [season, list] of Object.entries(official.seasons)) {
+      const full = JSON.parse(readFileSync(fileURLToPath(new URL(`../fixtures/nfl/golden/${season}.input.json`, import.meta.url)), 'utf8')) as StandingsInput;
+      const ours = new Map(replayClinches(full).map((c) => [`${c.team}|${c.type}`, c]));
+      const theirs = new Set(list.map((o) => `${o.team_id}|${o.type}`));
+      for (const o of list) {
+        const c = ours.get(`${o.team_id}|${o.type}`);
+        total++;
+        if (!c) continue; // decided only by tiebreakers, which the conservative check doesn't credit
+        expect(c.after_week, `${season} ${o.team_id} ${o.type}`).toBeGreaterThanOrEqual(o.after_week);
+        if (c.after_week === o.after_week) sameWeek++;
+      }
+      for (const key of ours.keys()) expect(theirs.has(key), `${season} ${key} proven by us but not official`).toBe(true);
+    }
+    // 2026-11-21 baseline: 178 of 252 in the same week. A drop means the check got later; a rise is welcome.
+    expect(sameWeek).toBeGreaterThanOrEqual(178);
+    expect(total).toBe(252);
   });
 
   it('never contradicts the real tiebreakers', () => {

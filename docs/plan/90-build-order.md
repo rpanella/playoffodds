@@ -89,7 +89,7 @@ Per [features/14](features/14-clinch-magic-elimination.md) §3–4:
 - **Status 2026-11-21:**
   - Built: `computeClinch` (every team and target, plus controls-own-destiny), the `clinch` command, and `clinch_statuses` written by every snapshot.
   - Checked: the brute-force harness (random seasons) and the 2020–2025 replay against final standings.
-  - Still to do: the lag versus official announcement dates, which needs the dates (SportsCrunch's official standings crawl, or a researched list).
+  - Lag versus official dates measured (features/14 §4): never ahead of the league; 178 of 252 official clinches and eliminations in the same week, 47 one or two weeks later, 27 tiebreaker-only.
 
 **Done when:**
 

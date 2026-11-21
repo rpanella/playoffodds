@@ -1,0 +1,1279 @@
+{
+ "source": "NFL.com standings API (api.nfl.com/football/v2/standings?seasonType=REG&season=YYYY&week=N), per-week snapshots of each team's clinched flags (playoff, division, home field, eliminated); retrieved 2026-11-21. Cross-checked against 31 of the NFL's weekly Playoff Scenarios releases (nflcommunications.com via the Wayback Machine for 2020-2023, media.nfl.com for 2024-2025): every berth, division and No. 1 seed in them matches.",
+ "semantics": "after_week = the regular-season week after whose games (including Monday night) the status first held. One entry per team per type: playoff_berth, division, top_seed (No. 1 seed), eliminated (from playoff contention).",
+ "notes": "SOURCE (all six seasons, every entry): NFL.com Shield API GET https://api.nfl.com/football/v2/standings?seasonType=REG&season=YYYY&week=N, anonymous bearer token minted from https://api.nfl.com/identity/v3/token with NFL.com's public web-client key (the same flow sportsdataverse-py uses). Each week returns a frozen per-week snapshot with a clinched object {playoff, wildCard, division, bye, homeField, eliminated}. Past weeks ARE historical: 2023 SF playoff=false at week 13 and true at week 14 (it clinched on MNF, so a week's snapshot includes Monday games); 2024 KC false at week 12 and true at week 13; 2024 week 12 has no flags at all; across all 107 team-week files no flag ever reverts. Mapping: playoff (or wildCard) -> playoff_berth; division -> division; bye/homeField (always set together) -> top_seed; eliminated -> eliminated. after_week = first weekly snapshot in which the flag is true, i.e. status held after that week's games. COMPLETENESS: 2020-2025 all complete. Each season has 42 entries: 14 playoff_berth, 8 division, 2 top_seed, 18 eliminated, covering all 32 teams. date is omitted everywhere because neither source names the clinching game. Derive the game from the schedule for that week. CROSS-CHECK: the official weekly NFL Football Communications/Operations 'Playoff Scenarios' releases carry a CLINCHED list entering week N (= after week N-1). The same text is hosted at nflcommunications.com (2020-2023, retrieved via the Wayback Machine), operations.nfl.com (2023 entering week 18, Wayback) and media.nfl.com (2024-2025, live). Releases used, by entering week: 2020 13,15,16,17; 2021 14,15,16,17,18; 2022 13,14,15,16,17 plus the NFL.com news article 'NFC playoff-clinching scenarios for Week 18 of 2022' (NFC only); 2023 13-18; 2024 13-18; 2025 15-18. All 31 releases match the Shield snapshot for the prior week exactly on berth, division and top seed. An entry's corroborated_by field cites the release that first lists it. first_week_confirmed=true means the release one week earlier did not list it, which pins the first week; 91 entries have this. first_week_confirmed=null means the earlier release is missing (2020 entering week 14): 2020 GB/PIT playoff_berth and GB/KC division after week 14 rest on Shield, with official bounds after week 12-14. GAPS: 2020 KC and NO playoff_berth after week 13 have no entering-week-14 release; the week-13 release shows none clinched and the week-15 release lists both. 2022 CIN division after week 17 is Shield-only (the AFC entering-week-18 release was not found). It reflects the Jan 2023 ruling that the cancelled BUF-CIN week-17 game would not be resumed, with seeding by win percentage: CIN 11-4 could not be caught by BAL. A solver needs that override. Clinches after the final week (after_week 17 in 2020, 18 later) have no later release and are Shield-only; they match final standings. Eliminations are Shield-only because the official releases do not list eliminated teams. Some releases go out before the prior week's last game: the 2024 entering-week-18 release predates DET's week-17 MNF and lists DET as '13-2 entering MNF'. Pro Football Reference markers were not used. TEAMS: team is Shield's fullName, except Washington, which is shown as Washington Football Team for 2020-2021 (Shield returns the current name for every season). abbr is Shield's code (AZ, LA, WAS, JAX, LV, ...). team_id maps it to this project's nfl-<abbr> ids (AZ->nfl-ari, LA->nfl-lar, WAS->nfl-wsh). Raw caches are in data/shield, data/wb, data/media and data/news next to this file. The cross-check is in data/crosscheck.json and the scripts are in scripts/.",
+ "seasons": {
+  "2020": [
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 11
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "eliminated",
+    "after_week": 12
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "playoff_berth",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "playoff_berth",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "division",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "division",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "top_seed",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-nyg",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "top_seed",
+    "after_week": 17
+   }
+  ],
+  "2021": [
+   {
+    "team_id": "nfl-hou",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-nyg",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "top_seed",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "top_seed",
+    "after_week": 18
+   }
+  ],
+  "2022": [
+   {
+    "team_id": "nfl-chi",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-nyg",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "top_seed",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "top_seed",
+    "after_week": 18
+   }
+  ],
+  "2023": [
+   {
+    "team_id": "nfl-car",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-nyg",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "top_seed",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "top_seed",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "playoff_berth",
+    "after_week": 18
+   }
+  ],
+  "2024": [
+   {
+    "team_id": "nfl-buf",
+    "type": "division",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-nyg",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "playoff_berth",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "division",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "playoff_berth",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "division",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "top_seed",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "top_seed",
+    "after_week": 18
+   }
+  ],
+  "2025": [
+   {
+    "team_id": "nfl-nyg",
+    "type": "eliminated",
+    "after_week": 12
+   },
+   {
+    "team_id": "nfl-ari",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-lv",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-no",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-ten",
+    "type": "eliminated",
+    "after_week": 13
+   },
+   {
+    "team_id": "nfl-atl",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-cle",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-nyj",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-wsh",
+    "type": "eliminated",
+    "after_week": 14
+   },
+   {
+    "team_id": "nfl-cin",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-kc",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-mia",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-min",
+    "type": "eliminated",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-lar",
+    "type": "playoff_berth",
+    "after_week": 15
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "division",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-dal",
+    "type": "eliminated",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-buf",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-lac",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-phi",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-sf",
+    "type": "playoff_berth",
+    "after_week": 16
+   },
+   {
+    "team_id": "nfl-chi",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ne",
+    "type": "division",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-det",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-ind",
+    "type": "eliminated",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-gb",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-hou",
+    "type": "playoff_berth",
+    "after_week": 17
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-jax",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "division",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-bal",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-tb",
+    "type": "eliminated",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-car",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-pit",
+    "type": "playoff_berth",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-den",
+    "type": "top_seed",
+    "after_week": 18
+   },
+   {
+    "team_id": "nfl-sea",
+    "type": "top_seed",
+    "after_week": 18
+   }
+  ]
+ }
+}

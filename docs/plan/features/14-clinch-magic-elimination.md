@@ -69,6 +69,11 @@ Only teams the simulation puts at or very near 0% or 100% for a target need a se
   - Every computed clinch must hold in the actual final standings.
   - Where we have official announcement dates, every computed status must fall on or after them. Record our lag in days.
   - Reproducing a known official clinch weeks early would mean a bug.
+- **Measured 2026-11-21** against official clinch dates for 2020–2025 from NFL.com's standings API, checked against 31 of the NFL's weekly Playoff Scenarios releases. The dates are in `packages/standings/fixtures/nfl/clinch-official/2020-2025.json`; the comparison is `scripts/clinch-lag.ts`.
+  - We are never ahead of the league, and never claim what it doesn't.
+  - Of 252 official clinches and eliminations, 178 fall in the same week, 40 a week later and 7 two weeks later. 27 are never proven, because they were decided by tiebreakers, mostly on the last weekend.
+  - By type, the count in the same week: playoff spot 59 of 84, division title 34 of 48, top seed 7 of 12, eliminated 78 of 108.
+  - A test keeps "never ahead" and the 178 baseline. The late and never-proven ones are what exact tiebreaks in the search (§8) would recover.
 - **Live:** compare with the official markers each snapshot. If we show clinched and the official source never does, investigate as a bug. Official-only clinches are expected (lag).
 
 ## 5. Clinching scenarios (M4, first item after launch)
