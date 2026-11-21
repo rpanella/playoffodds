@@ -82,6 +82,8 @@
 | D53 | 2026-11-20 | **A run after every final by default**, or once per window (`snapshots.after_finals.mode` = `game` or `window`). Triggers within 90 s share a run | Runs take seconds now. If later features make them heavy, switch to windows |
 | D54 | 2026-11-20 | **SportsCrunch webhooks are the main trigger; polling is the fallback.** While any game is in progress, a poll every 10 minutes re-syncs the season, so missed webhooks only add delay | PlayoffOdds is SportsCrunch's first webhook consumer: a live test of a system the owner hasn't turned on for PoolCrunch mid-season |
 | D55 | 2026-11-20 | **Private until launch** through app-level HTTP basic auth (`SITE_BASIC_AUTH_*`), with the webhook and health check left open | Works on any host and keeps SportsCrunch's webhooks reachable, which a server- or platform-wide password would block |
+| D56 | 2026-11-21 | **Public pages render with Inertia SSR.** The same Vue page components render on the server through Inertia's SSR process (`php artisan inertia:start-ssr`, run as a Forge daemon) and hydrate in the browser. Decides O8 | One component system for static pages and the interactive picker later. The starter kit already builds the SSR bundle (`build:ssr`). Pages stay cacheable HTML for search engines, agents and a CDN |
+| D57 | 2026-11-21 | **Clinch search: custom branch-and-bound, no solver dependency.** After dominance fixing (in a clinch search the team loses out and contenders beat non-contenders; in an elimination search the reverse), only games between contenders branch. A depth-first search with per-team point bounds settles each question. HiGHS (WebAssembly) stays as a dev-only test oracle | Spike on 6,912 real problems (2020–2025, weeks 12–17, every team, target and question): no disagreements between the two. Branching games after dominance had a median of 2 and a maximum of 34. Branch-and-bound took at most 8 ms (p99 0.04 ms), the integer program at most 58 ms. Keeps `@playoffodds/standings` and its CLI dependency-free, with no 4 MB WASM to ship to SportsCrunch |
 
 ## Open questions
 
@@ -89,7 +91,7 @@
 |---|---|---|---|
 | O2 | Launch (M3) | **OPEN** | Crawler policy for AI **training** bots (e.g. `GPTBot`, `ClaudeBot`, `Google-Extended`). Search and user-triggered fetch bots are allowed by default (doc 05). Recommendation: allow search bots now; decide training separately |
 | O3 | Before announcing the public API | **OPEN** | Exact data license and attribution wording, compatible with upstream terms. D26 fixes "free with attribution", not the legal instrument |
-| O8 | Website milestone (M2) | **OPEN** | How public pages render useful HTML without JavaScript: Inertia SSR (a supervised Node SSR process) or another approach within D37. Decide when building the site |
+| O8 | Website milestone (M2) | **DECIDED by D56** | How public pages render useful HTML without JavaScript: Inertia SSR |
 | O9 | When building the SportsCrunch PHP wrapper | **OPEN** | How SportsCrunch gets a pinned version of the standings CLI: vendored single-file bundle, npm git dependency, or a private package registry. Recommendation: start with a vendored, version-stamped bundle |
 
 **Withdrawn by D45:** O4 (RPO/RTO/budget/headroom), O5 (privacy retention windows), O6 (API deprecation and limits), O7 (launch metrics and error budgets). They return as backlog items in doc 06 when the related feature or scale makes them relevant.

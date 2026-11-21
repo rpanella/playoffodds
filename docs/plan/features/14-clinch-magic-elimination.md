@@ -48,6 +48,16 @@ The search space is far too large to enumerate: about 80 remaining NFL games in 
 
 Either way, cap each problem's time. A timeout returns `alive` (no claim) and is logged.
 
+**Decided by the spike (2026-11-21, D57): branch-and-bound.**
+- **Dominance first.** Both questions are monotone in the other teams' points. A clinch search therefore has the team lose all its remaining games and every contender beat every non-contender. An elimination search does the reverse. Only games between two contenders branch.
+- **Contenders** are conference teams (division rivals, for the division title) that can still finish level with the team or better (clinch search), or strictly better (elimination search).
+- **The goal** counts the teams that rank against the team, division by division. A clinch fails if a rival is level or better and at least three non-division-winners are; the division title and top seed are simpler. Code: `packages/standings/src/clinch/`. Benchmark: `scripts/clinch-spike.ts`.
+- **Spike results:** 6,912 real problems with no disagreements against the HiGHS integer program. The median problem had 2 branching games and the largest 34. Branch-and-bound took at most 8 ms per problem.
+- **Correctness checks** (`packages/standings/test/clinch.test.ts`):
+  - On random seasons, all three searches match an unreduced brute force.
+  - Random completions run through the full NFL procedure never contradict a claim.
+  - Replaying 2020–2025 week by week, every claim holds in the final standings.
+
 ### Screen with the simulation
 
 Only teams the simulation puts at or very near 0% or 100% for a target need a search. If simulated worlds already show both outcomes, the team is `alive`. This keeps a snapshot to a handful of solver calls.

@@ -81,7 +81,7 @@
 
 Per [features/14](features/14-clinch-magic-elimination.md) §3–4:
 
-- **Solver choice:** prototype the integer-program approach (WebAssembly solver in Node) against a custom branch-and-bound on real Week 12–14 states, and pick one.
+- **Solver choice:** prototype the integer-program approach (WebAssembly solver in Node) against a custom branch-and-bound on real Week 12–14 states, and pick one. **Done 2026-11-21: branch-and-bound (D57).**
 - **`computeClinch`** for NFL targets (playoff spot, division, top seed) with conservative tiebreaks, simulation screening, per-problem time caps and controls-own-destiny.
 - **Brute-force harness:** exhaustive enumeration for small leagues and the last one or two weeks of real seasons.
 - **History replay:** NFL 2020–2025, week by week.
