@@ -184,7 +184,7 @@ describe('clinch searches', () => {
       if (div!.status === 'clinched' || top!.status === 'clinched') expect(po!.status).toBe('clinched');
       if (po!.status === 'eliminated') expect([div!.status, top!.status]).toEqual(['eliminated', 'eliminated']);
       for (const x of [po!, div!, top!]) {
-        expect(x.controls_destiny === null, `${team} ${x.target} ${x.status}`).toBe(x.status !== 'alive');
+        expect(x.controls_destiny === null, `${team} ${x.target} ${x.status}`).toBe(x.status !== 'alive' || x.timed_out);
       }
     }
     expect(out.statuses.some((x) => x.status === 'alive' && x.controls_destiny)).toBe(true);

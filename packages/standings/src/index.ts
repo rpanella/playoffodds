@@ -9,5 +9,5 @@ export { createSimEvaluator, newTiebreakStats } from './sim';
 export type { DrawInt, SeedResult, SimEvaluator, SimWorld, TiebreakStats } from './sim';
 export { STANDINGS_VERSION } from './version';
 export { CLINCH_METHOD, computeClinch } from './clinch/compute';
-export type { ClinchOutput, ClinchState, ClinchStatus } from './clinch/compute';
+export type { ClinchOptions, ClinchOutput, ClinchState, ClinchStatus } from './clinch/compute';
 export type { ClinchTarget } from './clinch/problem';

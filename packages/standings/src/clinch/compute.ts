@@ -18,7 +18,7 @@ export interface ClinchStatus {
    * Null once the team has clinched or been eliminated, where it would only restate the status.
    */
   controls_destiny: boolean | null;
-  /** A search hit the time limit, so `alive` makes no claim either way. */
+  /** A search hit its time limit: an `alive` status makes no claim, or `controls_destiny` is undecided (null). */
   timed_out: boolean;
 }
 
@@ -36,14 +36,28 @@ export interface ClinchOutput {
   runtime_ms: number;
 }
 
+export interface ClinchOptions {
+  /** Per clinch or elimination search. These are fast all season; the limit is a safety net. */
+  timeLimitMs?: number;
+  /**
+   * Per controls-own-destiny search. Early in the season proving it for weak teams can take millions of
+   * steps (week 2–4: up to seconds), and the answer is nearly always yes and uninformative, so it gets a short
+   * budget; an undecided one is reported as null with `timed_out`.
+   */
+  destinyTimeLimitMs?: number;
+  /** Skip controls-own-destiny entirely (all null), e.g. for history replays. */
+  destiny?: boolean;
+}
+
 /**
  * Clinched, eliminated or alive for every team and target as of the input's results (features/14 §2–3).
  * Conservative: a claim is always true under the real tiebreakers, but can come later than the league's.
  */
-export function computeClinch(input: StandingsInput, opts: { timeLimitMs?: number } = {}): ClinchOutput {
+export function computeClinch(input: StandingsInput, opts: ClinchOptions = {}): ClinchOutput {
   const started = performance.now();
   const { rules, idx, baseline: s } = prepareSeason(input);
-  const limit = opts.timeLimitMs ?? 2000;
+  const limit = opts.timeLimitMs ?? 1000;
+  const destinyLimit = opts.destinyTimeLimitMs ?? 50;
   const targets: ClinchTarget[] = ['playoffs', 'division', ...(rules.format.byes > 0 ? (['top_seed'] as const) : [])];
   // A search that gives up (null) proves nothing.
   const proven = (found: boolean | null) => found === false;
@@ -56,9 +70,9 @@ export function computeClinch(input: StandingsInput, opts: { timeLimitMs?: numbe
       const status: ClinchState = proven(miss) ? 'clinched' : proven(make) ? 'eliminated' : 'alive';
       let destiny: boolean | null = null;
       let timedOut = miss === null || make === null;
-      if (status === 'alive') {
-        const ifWinsOut = branchAndBound(buildProblem(idx, s, rules, team, target, 'clinched', true), performance.now() + limit).found;
-        destiny = proven(ifWinsOut);
+      if (status === 'alive' && opts.destiny !== false) {
+        const ifWinsOut = branchAndBound(buildProblem(idx, s, rules, team, target, 'clinched', true), performance.now() + destinyLimit).found;
+        destiny = ifWinsOut === null ? null : !ifWinsOut;
         timedOut ||= ifWinsOut === null;
       }
       statuses.push({ team: id, target, status, controls_destiny: destiny, timed_out: timedOut });
