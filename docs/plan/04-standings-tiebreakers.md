@@ -58,12 +58,14 @@ export const nfl2020: RulesModule = {
 ```
 
 - `selectRules(league, season)` returns exactly one module. Zero or more than one match is an error.
-- **Adding an era** means a new module, `.md` and fixtures. Changing an era's behavior after snapshots have used it means bumping the package version. Snapshots record both `rules_id` and `engine_version`.
+- **Adding an era** means a new module, `.md` and fixtures. Changing an era's behavior after snapshots have used it means bumping the package version. Snapshots record `rules_id` and the package version (`STANDINGS_VERSION`, which the simulator's output carries as `standings_version`).
 - **Missing data is explicit.** If a step needs data we don't have (for example net touchdowns, which SportsCrunch doesn't record), the step reports itself as unavailable. It is never silently skipped. See §5.
 
 ## 4. NFL (first league)
 
-The summary below is from NFL.com's tie-breaking procedures. **Verify it against the current official text and cite it in `rules/nfl/2020.md` before encoding.**
+The summary below was verified in M0 against NFL.com's official text (retrieved 2026-10-21). The cited version, with our interpretations, is `packages/standings/rules/nfl/2020.md`. The summary glosses over two details:
+- A multi-club tie reduced from four to three clubs restarts the three-club procedure: division at step 1, wild card at step 2.
+- Home field among wild cards uses division tiebreakers for clubs from the same division.
 
 - **Division, two clubs:** head-to-head; division record; common games; conference record; strength of victory; strength of schedule; combined ranking in points scored and allowed (conference, then all teams); net points in common games; net points in all games; net touchdowns; coin toss.
 - **Division, three or more clubs:** same sequence using head-to-head among all tied clubs. When the tie is reduced to two clubs, restart at step 1 of the two-club procedure.

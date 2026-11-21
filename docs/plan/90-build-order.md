@@ -33,7 +33,7 @@
 
 **SportsCrunch**
 
-- Start the matchup odds endpoint ([03](03-sportscrunch-integration.md) §4).
+- Start the matchup odds endpoint ([03](03-sportscrunch-integration.md) §4). It shipped on 2026-11-20.
 - Confirm that `is_projected` (or equivalent) is available for current games.
 
 **Done when:**
@@ -47,12 +47,12 @@
 ## M1 — Pipeline (~Nov 2 – ~Nov 16)
 
 - Scaffold Laravel 13 with the official Vue starter kit (D37), MySQL `podds` and Horizon, after confirming current versions.
-- Mirror tables and a SportsCrunch client; scheduled sync.
+- Mirror tables and a SportsCrunch client; scheduled sync. The client fetches `matchup-odds?at=` at the same instant as `historical-odds?at=` (NFL only so far). A consumer test pins the matrix-versus-unlined-game check, skipping teams with week-varying adjustments ([03](03-sportscrunch-integration.md) §4).
 - Snapshot job per [02](02-simulation-outputs.md) §3: build input, skip if unchanged, store gzipped input, run the CLI, publish in a transaction, leave current untouched on failure.
 - Triggers: daily schedule, webhook or poll after game finals (debounced), and an artisan command for manual runs.
 - Backfill the 2026 NFL season from Week 1 as `reconstructed` daily snapshots.
 - A minimal internal view or artisan command to list snapshots, their diagnostics and failures.
-- **SportsCrunch:** ship the matchup odds endpoint, then start the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
+- **SportsCrunch:** the matchup odds endpoint shipped on 2026-11-20 for the NFL. Next is the official standings crawl with clinch markers, which serves as the cross-check for our clinch statuses.
 
 **Done when:**
 

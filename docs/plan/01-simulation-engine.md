@@ -109,6 +109,7 @@ Treat the drifted probability as expected home win credit `m`. With tie probabil
 {
   "schema": "sim-output/1",
   "engine_version": "0.3.0+a1b2c3d",
+  "standings_version": "0.2.0",
   "rules_id": "nfl@2020",
   "drift_id": "nfl-line-drift@v2",
   "sims": 100000, "seed": "01JBQ7…", "runtime_ms": 6400,
@@ -136,7 +137,12 @@ NFL bracket: seeds 1–7 per conference, seed 1 gets a bye, Wild Card games are 
 
 ## 8. Performance targets
 
-- NFL: 100k sims in under ~10 s on the production server, measured in M0.
+- NFL: 100k sims in under ~10 s on the production server.
+- **Measured in M0** (2026-10-21, i9-13900K):
+  - single-threaded: 5.9 s with three weeks left, 13.4 s with fifteen;
+  - the CLI splits sims across worker threads: 1.6 s and 3.6 s with four threads;
+  - output is identical for any thread count;
+  - the live 2026 season at week 7 took 1.8 s.
 - If that misses, split sims across Node `worker_threads` (possible because draws are keyed per sim), or ship at a lower count with the count shown on the methodology page.
 - Browser (picker): 2k sims for a first result in well under a second on a mid-range phone, then refine toward 5k.
 
