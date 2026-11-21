@@ -2,6 +2,7 @@
 
 // Runs the real engine CLI (packages/cli/dist) on the 2024 season with the last week unplayed.
 
+use App\Models\ClinchStatus;
 use App\Models\CurrentSnapshot;
 use App\Models\Game;
 use App\Models\Snapshot;
@@ -45,6 +46,14 @@ it('publishes a snapshot, makes it current and writes the current game probabili
         expect((float) $sum)->toEqualWithDelta(7.0, 1e-4);
     }
     expect(SnapshotStanding::whereNotNull('seed')->count())->toBe(14);
+
+    // With only week 18 left, the clinch check has claims to make, and every team has all three targets.
+    expect(ClinchStatus::where('snapshot_id', $snapshot->id)->count())->toBe(96)
+        ->and(ClinchStatus::where('status', 'clinched')->count())->toBeGreaterThan(0)
+        ->and(ClinchStatus::where('status', 'eliminated')->count())->toBeGreaterThan(0)
+        ->and(ClinchStatus::where('status', 'clinched')->where('controls_destiny', false)->count())->toBe(0)
+        ->and(ClinchStatus::value('method_version'))->toBe('conservative-bnb@1')
+        ->and($snapshot->diagnostics['clinch']['timed_out'])->toBe(0);
 
     $scheduled = Game::where('status', 'scheduled')->get();
     expect($scheduled->every(fn (Game $g): bool => $g->p_home === 0.57 && $g->odds_snapshot_id === $snapshot->id))->toBeTrue()

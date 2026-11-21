@@ -70,6 +70,12 @@ class Snapshot extends Model
         return $this->hasMany(TeamOdds::class);
     }
 
+    /** @return HasMany<ClinchStatus, $this> */
+    public function clinchStatuses(): HasMany
+    {
+        return $this->hasMany(ClinchStatus::class);
+    }
+
     /** @return HasMany<SnapshotStanding, $this> */
     public function standings(): HasMany
     {

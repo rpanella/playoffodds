@@ -60,7 +60,7 @@ Either way, cap each problem's time. A timeout returns `alive` (no claim) and is
 
 ### Screen with the simulation
 
-Only teams the simulation puts at or very near 0% or 100% for a target need a search. If simulated worlds already show both outcomes, the team is `alive`. This keeps a snapshot to a handful of solver calls.
+Only teams the simulation puts at or very near 0% or 100% for a target need a search. If simulated worlds already show both outcomes, the team is `alive`. This keeps a snapshot to a handful of solver calls. **Not needed at launch (2026-11-21):** with the chosen search, all 32 teams × 3 targets take under 20 ms, so every snapshot checks everything.
 
 ## 4. Validation
 

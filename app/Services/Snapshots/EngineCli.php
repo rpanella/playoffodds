@@ -30,6 +30,17 @@ class EngineCli
         return $this->run('standings', [config()->string('snapshots.engine.standings'), 'standings'], $input);
     }
 
+    /**
+     * Clinched, eliminated or alive for every team and target at the input's as_of (features/14).
+     *
+     * @param  array<string, mixed>  $input
+     * @return array<string, mixed>
+     */
+    public function clinch(array $input): array
+    {
+        return $this->run('clinch', [config()->string('snapshots.engine.standings'), 'clinch'], $input);
+    }
+
     /** A hash of both bundles, so any change to the engine or the standings package changes it. */
     public function build(): string
     {

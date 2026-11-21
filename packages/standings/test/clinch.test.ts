@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import highsLoader from 'highs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { computeStandings, prepareSeason, type GameInput, type StandingsInput } from '../src';
+import { CLINCH_METHOD, computeClinch, computeStandings, prepareSeason, type GameInput, type StandingsInput } from '../src';
 import { buildProblem, CLINCH_TARGETS, goal, type ClinchProblem, type ClinchQuestion, type ClinchTarget } from '../src/clinch/problem';
 import { branchAndBound, bruteForce, integerProgram, type LpSolver } from '../src/clinch/solvers';
 import { fullTeams } from './helpers';
@@ -64,15 +64,20 @@ function randomSeason(seed: number, perTeam: number, unplayed: number): Standing
   return { league: 'nfl', season: 2026, teams, games };
 }
 
-/** Unreduced oracle: over every completion of every remaining game, does a witness exist? */
-function oracle(input: StandingsInput, team: number, target: ClinchTarget, question: ClinchQuestion): boolean {
+/**
+ * Unreduced oracle: over every completion of every remaining game, does a witness exist? With `winsOut`,
+ * the team's own games are fixed as wins first (controls its own destiny).
+ */
+function oracle(input: StandingsInput, team: number, target: ClinchTarget, question: ClinchQuestion, winsOut = false): boolean {
   const { idx, baseline: s, rules } = prepareSeason(input);
   const mode = question === 'clinched' ? 'miss' : 'make';
   const conf = idx.confOf[team]!;
   const others = idx.confTeams[conf]!.filter((i) => i !== team && (target !== 'division' || idx.divOf[i] === idx.divOf[team]));
   const divIds = [...new Set(others.map((i) => idx.divOf[i]!))];
-  const open = idx.gameIds.map((_, g) => g).filter((g) => s.result[g] === 0);
   const points = idx.teamIds.map((_, i) => 2 * s.w[i]! + s.t[i]!);
+  const ownGame = (g: number) => idx.home[g] === team || idx.away[g] === team;
+  const open = idx.gameIds.map((_, g) => g).filter((g) => s.result[g] === 0 && !(winsOut && ownGame(g)));
+  if (winsOut) points[team]! += 2 * idx.teamGames[team]!.filter((g) => s.result[g] === 0).length;
   const games = idx.teamIds.map((_, i) => idx.teamGames[i]!.length);
   const pr: ClinchProblem = {
     target, mode, wildCards: rules.format.wildCards, teamPoints: 0, teamGames: games[team]!,
@@ -121,6 +126,10 @@ describe('clinch searches', () => {
           expect(branchAndBound(pr).found, `${label} branch-and-bound`).toBe(expected);
           expect(integerProgram(pr, highs).found, `${label} integer program`).toBe(expected);
           if (!expected) proven++;
+          if (question === 'clinched') {
+            const destiny = buildProblem(idx, s, rules, team, target, question, true);
+            expect(branchAndBound(destiny).found, `${label} if it wins out`).toBe(oracle(input, team, target, question, true));
+          }
         }
       }
     }
@@ -155,6 +164,30 @@ describe('clinch searches', () => {
       }
     }
     expect(claims).toBeGreaterThan(100);
+  });
+
+  it('computeClinch reports 2020 after week 14 consistently', () => {
+    const full = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/nfl/golden/2020.input.json', import.meta.url)), 'utf8')) as StandingsInput;
+    const starts = full.games.map((g) => Date.parse(g.start!)).sort((a, b) => a - b);
+    const cutoff = starts[0]! + (7 * 14 - 1) * 86_400_000; // the Wednesday after week 14
+    const out = computeClinch({ ...full, games: full.games.map((g) => (Date.parse(g.start!) < cutoff ? g : { ...g, status: 'scheduled' as const, home_score: null, away_score: null })) });
+
+    expect(out).toMatchObject({ schema: 'clinch-output/1', rules_id: 'nfl@2020', method: CLINCH_METHOD, targets: ['playoffs', 'division', 'top_seed'] });
+    expect(out.statuses).toHaveLength(32 * 3);
+    const status = (team: string, target: ClinchTarget) => out.statuses.find((x) => x.team === team && x.target === target)!;
+    expect(status('nfl-kc', 'division').status).toBe('clinched');
+    expect(status('nfl-gb', 'division').status).toBe('clinched');
+    expect(status('nfl-no', 'playoffs').status).toBe('clinched');
+    expect(status('nfl-nyj', 'playoffs').status).toBe('eliminated'); // 0-13
+    for (const team of new Set(out.statuses.map((x) => x.team))) {
+      const [po, div, top] = (['playoffs', 'division', 'top_seed'] as const).map((t) => status(team, t));
+      if (div!.status === 'clinched' || top!.status === 'clinched') expect(po!.status).toBe('clinched');
+      if (po!.status === 'eliminated') expect([div!.status, top!.status]).toEqual(['eliminated', 'eliminated']);
+      if (po!.status === 'clinched') expect(po!.controls_destiny).toBe(true);
+      if (po!.status === 'eliminated') expect(po!.controls_destiny).toBe(false);
+    }
+    expect(out.statuses.some((x) => x.status === 'alive' && x.controls_destiny)).toBe(true);
+    expect(out.statuses.every((x) => !x.timed_out)).toBe(true);
   });
 
   it('never contradicts the real tiebreakers', () => {

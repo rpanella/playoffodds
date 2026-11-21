@@ -2,6 +2,7 @@
 
 namespace App\Services\Snapshots;
 
+use App\Models\ClinchStatus;
 use App\Models\CurrentSnapshot;
 use App\Models\Game;
 use App\Models\Season;
@@ -110,7 +111,8 @@ class SnapshotRunner
             Storage::disk(config()->string('snapshots.disk'))->put($path, $gzipped);
             $sim = $this->engine->simulate($input);
             $standings = $this->engine->standings($input);
-            $current = $this->publish($snapshot, $season, $input, $sim, $standings);
+            $clinch = $this->engine->clinch($input);
+            $current = $this->publish($snapshot, $season, $input, $sim, $standings, $clinch);
         } catch (Throwable $e) {
             $snapshot->update(['status' => Snapshot::STATUS_FAILED, 'error' => $e->getMessage()]);
             throw $e;
@@ -141,8 +143,9 @@ class SnapshotRunner
      * @param  array<string, mixed>  $input
      * @param  array<string, mixed>  $sim
      * @param  array<string, mixed>  $standings
+     * @param  array<string, mixed>  $clinch
      */
-    private function publish(Snapshot $snapshot, Season $season, array $input, array $sim, array $standings): bool
+    private function publish(Snapshot $snapshot, Season $season, array $input, array $sim, array $standings, array $clinch): bool
     {
         $seasonTeamIds = [];
         foreach ($season->seasonTeams()->with('team')->get() as $st) {
@@ -151,7 +154,7 @@ class SnapshotRunner
         $seasonTeamId = fn (string $teamId): int => $seasonTeamIds[$teamId]
             ?? throw new SnapshotException("Engine output names team {$teamId}, which isn't in the season");
 
-        return DB::transaction(function () use ($snapshot, $season, $input, $sim, $standings, $seasonTeamId): bool {
+        return DB::transaction(function () use ($snapshot, $season, $input, $sim, $standings, $clinch, $seasonTeamId): bool {
             foreach ($sim['teams'] as $teamId => $odds) {
                 TeamOdds::create([
                     'snapshot_id' => $snapshot->id,
@@ -190,13 +193,32 @@ class SnapshotRunner
                 ]);
             }
 
+            foreach ($clinch['statuses'] as $c) {
+                ClinchStatus::create([
+                    'snapshot_id' => $snapshot->id,
+                    'season_team_id' => $seasonTeamId($c['team']),
+                    'target' => $c['target'],
+                    'status' => $c['status'],
+                    'controls_destiny' => $c['controls_destiny'],
+                    'timed_out' => $c['timed_out'],
+                    'method_version' => $clinch['method'],
+                ]);
+            }
+
             $snapshot->update([
                 'status' => Snapshot::STATUS_PUBLISHED,
                 'engine_version' => $sim['engine_version'],
                 'standings_version' => $sim['standings_version'],
                 'rules_id' => $sim['rules_id'],
                 'runtime_ms' => $sim['runtime_ms'],
-                'diagnostics' => $sim['diagnostics'] + ['standings_unresolved' => $standings['unresolved']],
+                'diagnostics' => $sim['diagnostics'] + [
+                    'standings_unresolved' => $standings['unresolved'],
+                    'clinch' => [
+                        'method' => $clinch['method'],
+                        'runtime_ms' => $clinch['runtime_ms'],
+                        'timed_out' => count(array_filter($clinch['statuses'], fn (array $c): bool => $c['timed_out'])),
+                    ],
+                ],
                 'published_at' => now(),
             ]);
 

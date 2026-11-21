@@ -39,6 +39,10 @@ export interface ClinchProblem {
   teams: number[];
 }
 
+/**
+ * @param winsOut  Fix the team's remaining games as wins instead of the dominant choice, for "controls its own
+ *                 destiny" (a clinch search in which the team wins every remaining game).
+ */
 export function buildProblem(
   idx: SeasonIndex,
   s: SeasonState,
@@ -46,6 +50,7 @@ export function buildProblem(
   team: number,
   target: ClinchTarget,
   question: ClinchQuestion,
+  winsOut = false,
 ): ClinchProblem {
   const mode = question === 'clinched' ? 'miss' : 'make';
   const points = (i: number) => 2 * s.w[i]! + s.t[i]!;
@@ -53,11 +58,11 @@ export function buildProblem(
   const unplayed = (i: number) => idx.teamGames[i]!.filter((g) => s.result[g] === 0);
   const other = (g: number, i: number) => (idx.home[g] === i ? idx.away[g]! : idx.home[g]!);
 
-  // The team's own remaining games: lost in a `miss` search, won in a `make` search.
+  // The team's own remaining games: lost in a `miss` search, won in a `make` search (or won, for `winsOut`).
   let teamPoints = points(team);
   const fromTeam = new Map<number, number>();
   for (const g of unplayed(team)) {
-    if (mode === 'make') teamPoints += 2;
+    if (mode === 'make' || winsOut) teamPoints += 2;
     else fromTeam.set(other(g, team), (fromTeam.get(other(g, team)) ?? 0) + 2);
   }
   const teamGames = gamesOf(team);
