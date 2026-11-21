@@ -14,6 +14,12 @@ return [
     |
     */
 
+    'sportscrunch' => [
+        'url' => env('SPORTSCRUNCH_API_URL', 'https://sportscrunch.com'),
+        'token' => env('SPORTSCRUNCH_API_KEY'),
+        'timeout' => (int) env('SPORTSCRUNCH_API_TIMEOUT', 60),
+    ],
+
     'postmark' => [
         'key' => env('POSTMARK_API_KEY'),
     ],

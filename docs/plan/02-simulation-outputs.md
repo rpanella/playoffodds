@@ -24,10 +24,10 @@ Laravel keeps a local mirror of the SportsCrunch data it needs, runs simulations
 | Table | Key columns |
 |---|---|
 | `leagues` | `id`, `code` (`nfl`), `name`, `timezone`, `daily_snapshot_time` |
-| `seasons` | `id`, `league_id`, `year`, `sc_season_id`, `status`, `synced_at` |
-| `teams` | `id`, `league_id`, `sc_team_id`, `slug`, `name`, `short_name`, `abbreviation` |
-| `season_teams` | `id`, `season_id`, `team_id`, `conference`, `division` (alignment is per season) |
-| `games` | `id`, `season_id`, `sc_game_id`, `home_season_team_id`, `away_season_team_id`, `start_at`, `week`, `season_type`, `neutral`, `status`, `home_score`, `away_score`, `end_type` (null until NHL), `p_home`, `p_source`, `sc_updated_at` |
+| `seasons` | `id`, `league_id`, `year`, `sc_season_id`, `status`, regular and postseason start and end dates, `synced_at` |
+| `teams` | `id`, `league_id`, `sc_team_id`, `slug` (`buffalo-bills`), `name` (`Buffalo Bills`), `location`, `short_name` (`Bills`), `abbreviation` (`BUF`; the engine's team ID is `nfl-buf`), `primary_color`, `secondary_color` |
+| `season_teams` | `id`, `season_id`, `team_id`, `conference` (`AFC`, mapped from SportsCrunch's full name in `config/leagues.php`), `division` (`AFC East`) (alignment is per season) |
+| `games` | `id`, `season_id`, `sc_game_id`, `home_season_team_id`, `away_season_team_id`, `start_at`, `week`, `season_type`, `neutral`, `status`, `home_score`, `away_score`, `end_type` (null until NHL), `p_home`, `p_source`, `odds_snapshot_id`. `status` is SportsCrunch's as sent (`scheduled`, `scheduled-tbd`, `live`, `final`, `postponed`, …); only regular and postseason games are copied |
 | `official_statuses` | `season_team_id`, `target`, `status`, `source`, `observed_at` (from the SportsCrunch crawl, when it exists) |
 
 ### Snapshots and results
@@ -40,6 +40,8 @@ Laravel keeps a local mirror of the SportsCrunch data it needs, runs simulations
 | `team_odds` | `snapshot_id`, `season_team_id`, `p_playoffs`, `p_division`, `p_top_seed`, `p_seed` (json array), `p_round` (json), `p_champion`, `wins_mean`, `wins_p10`, `wins_p50`, `wins_p90`, `wins_hist` (json) |
 | `clinch_statuses` | `snapshot_id`, `season_team_id`, `target` (`playoffs`, `division`, `top_seed`), `status` (`clinched`, `eliminated`, `alive`), `controls_destiny` (bool, null when not checked), `method_version`, `runtime_ms`, `details` (json: e.g. counterexample summary) |
 
+**Game probabilities on `games` are the current snapshot's**, not a synced copy. The sync never writes `p_home` or `p_source`. The publish step writes them from the input of the snapshot that becomes current, with `odds_snapshot_id`, so a page's game probabilities always match the odds shown beside them. Only current values are kept. Pages that show game probabilities (the team page's remaining schedule, the API's team endpoint) need only those, and the picker reads the current input file. Each snapshot's stored input already holds the probabilities it used, so history is there if a feature ever needs it.
+
 Store probabilities as decimals in [0, 1], for example `DECIMAL(7,6)`. Later features add their own tables, such as `game_conditionals` for leverage, a scenario cache for the picker, and push subscriptions.
 
 ## 3. Snapshot job
@@ -50,7 +52,7 @@ Store probabilities as decimals in [0, 1], for example `DECIMAL(7,6)`. Later fea
 4. **Skip if nothing changed.** If the input's sha256 and the engine and standings versions match the current snapshot, stop without creating a snapshot.
 5. **Store input.** Gzip the input and write it to `snapshots/{league}/{season}/{snapshot_id}.json.gz` on the artifact disk (S3 in production), then record the sha256.
 6. **Run.** Spawn the engine CLI (`node packages/cli/dist/simulate.mjs`) with Laravel's `Process` facade, with a timeout, and parse the output JSON. Then run the clinch CLI (`clinch` command, [features/14](features/14-clinch-magic-elimination.md)) on the same input, passing the simulation's 0%/100% results as its screen.
-7. **Publish.** In one database transaction, insert `snapshot_standings`, `team_odds` and `clinch_statuses`, mark the snapshot `published`, and upsert `current_snapshots`.
+7. **Publish.** In one database transaction, insert `snapshot_standings`, `team_odds` and `clinch_statuses`, mark the snapshot `published`, and upsert `current_snapshots`. If the snapshot becomes current, also write each remaining game's `p_home`, `p_source` and `odds_snapshot_id` from its input. A backfilled snapshot older than the current one doesn't.
 8. **On failure** at any step: mark the snapshot `failed` with the error, leave `current_snapshots` untouched, and alert after repeated failures.
 
 Jobs run on the Laravel queue (Horizon/Redis), one job at a time per league-season so runs don't race. The seed is derived from the snapshot ID.

@@ -1,0 +1,38 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('seasons', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('league_id')->constrained();
+            $table->unsignedSmallInteger('year');
+            $table->unsignedBigInteger('sc_season_id')->unique();
+            $table->string('status', 16);
+            $table->date('regular_season_start_date')->nullable();
+            $table->date('regular_season_end_date')->nullable();
+            $table->date('post_season_start_date')->nullable();
+            $table->date('post_season_end_date')->nullable();
+            $table->timestamp('synced_at')->nullable();
+            $table->timestamps();
+
+            $table->unique(['league_id', 'year']);
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('seasons');
+    }
+};

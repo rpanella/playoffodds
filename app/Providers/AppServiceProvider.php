@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Services\SportsCrunch\SportsCrunchClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->singleton(SportsCrunchClient::class, fn (): SportsCrunchClient => new SportsCrunchClient(
+            url: config()->string('services.sportscrunch.url'),
+            token: config('services.sportscrunch.token'),
+            timeout: config()->integer('services.sportscrunch.timeout'),
+        ));
     }
 
     /**
